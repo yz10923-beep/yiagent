@@ -48,7 +48,7 @@ nproc; free -h; df -h ~; head -2 /etc/os-release; docker --version; docker compo
 3. **The repo** (uv and Python 3.12 are already on the VM from kama):
 
    ```bash
-   git clone https://github.com/yz10923-beep/Yi-agent.git && cd Yi-agent
+   git clone https://github.com/yz10923-beep/yiagent.git && cd yiagent
    uv sync && make verify
    ```
 

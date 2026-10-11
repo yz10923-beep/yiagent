@@ -1,4 +1,4 @@
-# Yi-agent
+# yiagent
 
 An incident-triage agent: given an alert, it investigates a system's logs, metrics and
 traces in Elasticsearch and reports the root-cause service, the fault type and the
