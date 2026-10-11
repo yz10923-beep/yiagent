@@ -80,3 +80,73 @@ def make_case(
 
 def make_index(data_dir: Path, rows: list[dict[str, object]]) -> None:
     pq.write_table(pa.Table.from_pylist(rows), data_dir / "cases.parquet")
+
+
+FAMILIES = ("cpu", "mem", "diskio", "socket", "latency-50", "latency-90")
+# The metric family the paper names as each fault's root-cause indicator.
+INDICATOR = {"cpu": "cpu", "mem": "mem", "disk": "diskio", "socket": "socket"}
+NOISE = [0.9, 1.1, 1.0, 1.2, 0.8, 1.05, 0.95, 1.15, 0.85, 1.0]  # gives every series an IQR
+
+
+def make_fault_case(data_dir: Path, name: str, services: list[str]) -> Path:
+    """A case whose answer is planted where the paper says to look: the root cause's
+    resource metric jumps after the onset (cpu, mem, disk, socket), its latency jumps
+    (delay, loss), it emits error spans (loss, code-level) and an exception (code-level).
+    Every other series is stationary noise. 120 one-second rows on each side of the onset."""
+    from yi_agent.data.rcaeval import parse_case_name
+
+    label = parse_case_name(name)
+    rc, fault = label.service, label.fault
+    d = data_dir / name
+    d.mkdir(parents=True)
+    (d / "inject_time.txt").write_text(f"{ONSET_S}\n")
+    times = list(range(ONSET_S - 120, ONSET_S + 120))
+    cols: dict[str, object] = {"time": pa.array(times, pa.int64())}
+    for s in services:
+        for fam in FAMILIES:
+            base = [10.0 * NOISE[i % len(NOISE)] for i in range(len(times))]
+            jump = (s == rc) and (
+                fam == INDICATOR.get(fault)
+                or (fault in ("delay", "loss") and fam.startswith("latency"))
+            )
+            cols[f"{s}_{fam}"] = [
+                v + (500.0 if jump and t >= ONSET_S else 0.0)
+                for v, t in zip(base, times, strict=True)
+            ]
+    pq.write_table(pa.table(cols), d / "metrics.parquet")
+    code_level = fault.startswith("f")
+    log_rows: dict[str, list[object]] = {"timestamp": [], "container_name": [], "message": []}
+    for i, t in enumerate(range(ONSET_S - 60, ONSET_S + 60, 10)):
+        for s in services:
+            log_rows["timestamp"].append(t)
+            log_rows["container_name"].append(s)
+            log_rows["message"].append(f"handled request {i} in 12ms")
+    if code_level:
+        log_rows["timestamp"].append(ONSET_S + 5)
+        log_rows["container_name"].append(rc)
+        log_rows["message"].append(
+            "java.lang.NullPointerException: price is null\n\tat svc.Cart.total(Cart.java:42)"
+        )
+    pq.write_table(pa.table(log_rows), d / "logs.parquet")
+    spans: dict[str, list[object]] = {
+        k: [] for k in ("time", "spanID", "serviceName", "startTime", "statusCode")
+    }
+    for i, t in enumerate(range(ONSET_S - 60, ONSET_S + 60, 5)):
+        for j, s in enumerate(services):
+            erroring = s == rc and t >= ONSET_S and (fault == "loss" or code_level)
+            spans["time"].append("12:02")
+            spans["spanID"].append(f"{i:04x}{j:04x}")
+            spans["serviceName"].append(s)
+            spans["startTime"].append(t * 1_000_000)
+            spans["statusCode"].append(500 if erroring else 200)
+    pq.write_table(
+        pa.table(
+            {
+                **spans,
+                "startTime": pa.array(spans["startTime"], pa.int64()),
+                "statusCode": pa.array(spans["statusCode"], pa.int64()),
+            }
+        ),
+        d / "traces.parquet",
+    )
+    return d

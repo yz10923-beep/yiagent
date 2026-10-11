@@ -87,7 +87,8 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S1 closed (2026-10-11); next: S2 (the eval harness, before the agent).**
+**Current stage: S2 code done in the cloud container (2026-10-11); next: S2 on the VM (Yi
+reproduces BARO, approves the harness, scores the baselines on dev), then S3 (the agent).**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -126,13 +127,29 @@ Done in S1 (decisions in `docs/ROADMAP.md`, "S1 decisions"):
   cases, 17.7M documents, 2.2 GB) loaded and verified in 17.5 min. Loading is
   load-once-and-keep (`ensure_loaded`). Numbers and decisions in ROADMAP ("S1 status").
 
+Done in S2 so far (decisions and the paper's facts in `docs/ROADMAP.md`):
+- The report format (`eval/report.py`): ranked root causes, fault type, typed citations
+  (log line, span, metric + direction). The agent in S3 must return exactly this.
+- Graders (`eval/scoring.py`, `grade.py`, `grounding.py`): AC@1/AC@3/Avg@5 as RCAEval
+  defines them, chance per case, fault macro-F1 per suite, grounding (exists, holds, on
+  target) and expected evidence (the paper's root-cause indicator per fault), all read
+  from the source Parquet, not Elasticsearch. A run must cover its whole split.
+- Baselines (`eval/baselines.py`): oracle, empty, wrong, random, BARO (numpy port of
+  RCAEval's, `eval/baro.py`, MIT, attributed), and two leak detectors (shape-columns,
+  shape-time). Harness lock as in kama (`eval/harness.py`, `evals/harness.sha256`).
+- `yi eval baseline|score|reproduce-baro|evidence-coverage|metric-kinds`. Selftest in
+  `tests/unit/test_eval.py` (oracle 1.0, random at chance, empty and wrong 0, fabricated
+  evidence caught). 480 unit + 8 Elasticsearch tests.
+
 Not done yet, in order:
-1. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
-   selftest inside `make verify`; BARO scored on dev. Find out what RE3's F1-F5 mean
-   (from the paper; the data only says "code-level fault F1"). The Hugging Face copy has
-   no root-cause indicator column (only 8 RE3 Sock Shop cases ship `root_cause.txt`), so
-   S2 writes its own expected-evidence rules per fault type and documents them.
-2. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
+1. **S2 on the VM (Yi):** `docs/SETUP.md` step 8: metric families, `reproduce-baro` against
+   the published RE2-TT numbers, then approve the harness and score oracle, random,
+   BARO and the leak detectors on dev; evidence coverage. Yi sends the outputs and the
+   approved hash (`cat evals/harness.sha256`); the hash is committed here.
+2. **S3, the agent:** the loop (~200 lines, Yi must be able to explain it), read-only
+   telemetry tools bound to one case id, the report above as its final tool call; first
+   paid dev_small run, compared with BARO per fault.
+3. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
 
@@ -197,6 +214,7 @@ make es-up / es-down     # local Elasticsearch in Docker (127.0.0.1:9200)
 make es-test             # Elasticsearch integration tests (marker `es`)
 make live                # real-API tests (needs ANTHROPIC_API_KEY; costs money)
 uv run yi data --help    # fetch, check, inspect, audit, load, unload (data commands run on the VM)
+uv run yi eval --help    # baseline, score, reproduce-baro, evidence-coverage, metric-kinds
 ```
 
 Settings (`config.load_settings()`): `~/.yi/.env`, then `./.env`, then env vars (later
@@ -215,8 +233,14 @@ src/yi_agent/
   cli.py      `yi data ...`
   data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
               es_load (fresh indices per case, counts verified), alert, check (VM audits)
+  eval/       report (the agent's output format), scoring, grade, grounding, case_data
+              (grader reads Parquet), baro (port of RCAEval's), baselines, harness
+              (hash + approval), run (baseline -> trials -> scores.json), tables
 evals/grader/labels.json  id -> label; harness and graders only, never the agent
 evals/split.json          frozen dev / dev_small / test ids (hash pinned)
+evals/harness.sha256      the harness hash Yi approved (scoring refuses any other)
+evals/results/<variant>/<split>/  trials.jsonl + scores.json (with the harness hash)
+LICENSES/                 third-party licences (RCAEval, for the BARO port)
 tests/unit/          fast, no network
 tests/integration/   need Elasticsearch (marker `es`)
 tests/fakes.py       ScriptedProvider etc. for loop tests (from kama)

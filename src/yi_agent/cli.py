@@ -1,4 +1,5 @@
-"""`yi`: the command line. S1: `yi data ...` (fetch, check, inspect, audit, load, unload)."""
+"""`yi`: the command line. `yi data ...` (S1: fetch, check, inspect, audit, load, unload) and
+`yi eval ...` (S2: baseline, score, reproduce-baro, evidence-coverage, metric-kinds)."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ import io
 import sys
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 
 from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import Elasticsearch
@@ -24,6 +26,10 @@ from yi_agent.data.es_load import (
 from yi_agent.data.rcaeval import LABELS_PATH, SPLIT_PATH, CaseLabel, fetch, read_labels
 from yi_agent.data.split import read_split, split_hash
 from yi_agent.data.telemetry import TelemetryError, read_window
+from yi_agent.eval import baselines
+from yi_agent.eval import run as eval_run
+from yi_agent.eval.grade import RunInvalid
+from yi_agent.eval.harness import HarnessNotApproved
 
 SPLITS = ("dev", "dev_small", "test", "all")
 
@@ -143,6 +149,46 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _progress(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
+
+
+def cmd_eval_baseline(settings: Settings, args: argparse.Namespace) -> int:
+    path, table = eval_run.run_baseline(
+        args.name,
+        args.split,
+        settings.data_dir,
+        approve=args.approve_harness,
+        variant=args.variant,
+        seed=args.seed,
+        progress=_progress,
+    )
+    print(table)
+    print(f"trials: {path}\nscores: {path.parent / 'scores.json'}")
+    return 0
+
+
+def cmd_eval_score(settings: Settings, args: argparse.Namespace) -> int:
+    table, _ = eval_run.score_run(args.trials, args.split, settings.data_dir, args.approve_harness)
+    print(table)
+    return 0
+
+
+def cmd_eval_reproduce_baro(settings: Settings, args: argparse.Namespace) -> int:
+    print(eval_run.reproduce_baro(settings.data_dir, args.systems, progress=_progress))
+    return 0
+
+
+def cmd_eval_coverage(settings: Settings, args: argparse.Namespace) -> int:
+    print(eval_run.evidence_coverage(settings.data_dir, args.split, progress=_progress))
+    return 0
+
+
+def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
+    print(eval_run.metric_kinds(settings.data_dir, args.split))
+    return 0
+
+
 def cmd_unload(settings: Settings, args: argparse.Namespace) -> int:
     es = _es(settings)
     for i in args.ids:
@@ -180,6 +226,32 @@ def build_parser() -> argparse.ArgumentParser:
     c = data.add_parser("unload", help="delete a case's indices")
     c.add_argument("ids", nargs="+")
     c.set_defaults(fn=cmd_unload)
+
+    ev = sub.add_parser("eval", help="graders and baselines").add_subparsers(
+        dest="cmd", required=True
+    )
+    approve_help = "approve the current harness hash (Yi only, after reviewing the diff)"
+    c = ev.add_parser("baseline", help="run a non-LLM baseline on a split and score it")
+    c.add_argument("name", choices=baselines.NAMES)
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
+    c.add_argument("--variant", help="results directory name (default: the baseline's)")
+    c.add_argument("--seed", type=int, default=0)
+    c.add_argument("--approve-harness", action="store_true", help=approve_help)
+    c.set_defaults(fn=cmd_eval_baseline)
+    c = ev.add_parser("score", help="grade a trials.jsonl over a whole split")
+    c.add_argument("trials", type=Path)
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
+    c.add_argument("--approve-harness", action="store_true", help=approve_help)
+    c.set_defaults(fn=cmd_eval_score)
+    c = ev.add_parser("reproduce-baro", help="BARO on all RE2 cases vs the published numbers")
+    c.add_argument("--systems", nargs="+", choices=("ob", "ss", "tt"), default=["tt"])
+    c.set_defaults(fn=cmd_eval_reproduce_baro)
+    c = ev.add_parser("evidence-coverage", help="does each case's root-cause indicator exist?")
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
+    c.set_defaults(fn=cmd_eval_coverage)
+    c = ev.add_parser("metric-kinds", help="metric families each system exports")
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
+    c.set_defaults(fn=cmd_eval_metric_kinds)
     return p
 
 
@@ -200,6 +272,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"Elasticsearch not reachable at {settings.es_url}: run `make es-up`", file=sys.stderr
         )
+        return 2
+    except HarnessNotApproved as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except RunInvalid as e:
+        print(f"run is invalid, not scored: {e}", file=sys.stderr)
         return 2
     return rc
 

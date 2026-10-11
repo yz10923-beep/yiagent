@@ -134,12 +134,91 @@ line item.
   `text`). Elasticsearch's default maps JSON decimals to 32-bit `float`, which would
   silently round large durations or times stored as doubles.
 
+## Facts from the paper (RCAEval, WWW 2025, arXiv 2412.17015; checked 2026-10-11)
+
+- **Faults.** Resource faults are injected with stress-ng into the container: CPU hog
+  (cpu), memory leak (mem), disk stress (disk), **socket stress (socket)**. Network faults
+  use tc: delay variation (delay), packet drop (loss). RE3's code-level faults are bugs
+  planted in a service's source: **f1 incorrect parameter values, f2 missing parameters,
+  f3 missing function call, f4 incorrect return values, f5 missing exception handler.**
+- **Root-cause indicators** (what counts as the evidence): for a resource fault, the
+  container's resource-usage metric; for delay, the latency metric; for loss, failed
+  requests and/or error codes in traces; for code-level faults, stack traces in the
+  root-cause service's logs, else its error logs or error response codes.
+- **AC@k** = mean over cases of (true root causes in the top k) / min(k, |true set|); with
+  one root cause, 1 if it is in the top k. **Avg@k** = mean of AC@1..AC@k.
+- **BARO as RCAEval runs it** (`main.py --method baro`, `RCAEval/e2e/baro.py`): metrics only;
+  drop `_latency-50` columns; for Train Ticket keep only `ts-` columns; inf to NaN,
+  forward-fill, then 0; 10 min before and 10 min after `inject_time` (`--length 20`);
+  drop constant columns in each half; per metric, RobustScaler fit on the before-half
+  and score = max robust z over the after-half; rank metrics by score; services are
+  the metric prefix before the first `_` with `-db` removed, first occurrence kept.
+  **Published reference, RE2-TT, all 90 cases, Avg@5: cpu 0.72, mem 0.99, disk 1.0,
+  socket 0.83, delay 0.63, loss 0.64** (RCAEval README).
+- RCAEval's chance level for a case with n candidate services is AC@k = min(k, n)/n,
+  with the candidates counted after the same preprocessing (`--report-chance`).
+
+## S2 decisions (made 2026-10-11)
+
+- **The report the agent (and every baseline) returns** is one typed object: a ranked
+  list of root-cause services (graded on the top 5), a fault type from the suite's
+  vocabulary, and evidence as typed citations: a log line (container, time in ms, a
+  verbatim excerpt of at least 10 characters), a span (its `spanID`), or a metric (its
+  name and the direction it moved after the onset: up or down). Typed citations make
+  grounding checkable by code; free-text evidence would need a judge.
+- **Graders read the source Parquet, not Elasticsearch,** so a loader bug can't make a
+  citation look grounded.
+- **Root cause:** AC@1, AC@3, Avg@5 exactly as RCAEval defines them, service names
+  normalized the way RCAEval does (`-db` removed), so numbers compare with the paper.
+  Chance per case is min(k, n)/n over the candidate services RCAEval would count.
+- **Fault type:** macro-F1 per suite (RE2's 6 classes, RE3's 5 classes; never pooled);
+  a missing or out-of-vocabulary answer is wrong, not skipped.
+- **Grounding** (graded by code, never by the agent): *exists* (the cited line, span or
+  metric is in this case's data), *holds* (a metric moved in the stated direction: max
+  or min robust z after the onset beyond 3, BARO's statistic; a log line or span is
+  after the onset), and *on target* (the cited item is about the true root-cause
+  service). Plus **expected evidence**: did the report cite the paper's root-cause
+  indicator for the true fault type (rules in `eval/evidence.py`, coverage checked on the
+  real data with `yi eval evidence-coverage`).
+- **Selftest inside `make verify`:** an oracle report scores 1.0 everywhere; random
+  rankings over the candidates land at chance; an empty report scores 0; a confidently
+  wrong report scores 0; fabricated citations fail grounding.
+- **Baselines:** BARO (our numpy port of RCAEval's code, verified against the published
+  RE2-TT numbers above), random, majority fault, and a *BARO fault heuristic* (the fault
+  family of BARO's top metric: cpu, mem, latency -> delay), so the agent's fault-type
+  score has a non-LLM floor too.
+- **Exception to "test only at the end":** a baseline with no tunable parameters (BARO,
+  random) may be run on all cases, to check the implementation against published numbers.
+  The agent never is.
+- **Harness approval as in kama:** `evals/harness.sha256` holds the approved hash of the
+  graders, baselines, labels and split; `yi eval score` refuses to score if the hash
+  changed, until Yi re-runs it with `--approve-harness`. Every scores file records the
+  hash it was graded under.
+
+## S2 status
+
+Built and tested in the cloud container (2026-10-11), on synthetic cases with the answer
+planted where the paper says to look: oracle 1.00 everywhere; random at chance (300
+seeds x 9 cases); empty and confidently wrong reports 0; fabricated log lines, spans and
+metrics fail *exists*; a stationary metric cited as "up" fails *holds*; a real metric of
+another service is off target; a run missing a case, duplicating one, or carrying one
+from outside the split is invalid; infra errors are counted, not scored; changing any
+hashed file stops scoring until re-approved. On fake data under the real dev_small
+names the whole `yi eval` pipeline runs (oracle 1.00, random Avg@5 0.49 against a chance
+of 0.50). Open until the VM run: `reproduce-baro` against the published numbers, the
+real metric families and indicator coverage, and the dev scores of BARO, random and the
+leak detectors.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case
   (OB 69-77 columns). If a model given only the column names, row counts and file sizes
   beats chance on the root cause, the data's shape leaks the label and every score needs
-  that baseline next to it.
+  that baseline next to it. (Built in S2 as `shape`: leave-one-out nearest neighbour on
+  the metric column set, and separately on the injection time, since cases were likely
+  recorded one service after another. A column that vanishes because a container died is
+  a real symptom, not a leak; the time channel is the dangerous one, and matters as soon
+  as anything carries memory across cases, like S4's lessons ledger.)
 
 ## S1 status
 

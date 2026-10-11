@@ -24,3 +24,14 @@ ported in either direction.
 
 The span format is kept identical to kama's on purpose: `trace/analyze.py` reads traces
 from either project.
+
+## Ported from RCAEval
+
+`src/yi_agent/eval/baro.py` re-implements BARO as RCAEval runs it
+(github.com/phamquiluan/RCAEval, MIT, Copyright (c) 2024 Luan Pham; licence in
+`LICENSES/LICENSE-RCAEval`): `RCAEval/e2e/baro.py` (`baro`), the preprocessing it calls in
+`RCAEval/io/time_series.py`, and the data preparation and service mapping in `main.py`
+(read 2026-10-11, shallow clone of `main`). Changes: numpy instead of pandas and
+scikit-learn (same percentiles, same zero-spread rule); no other change in behaviour.
+The check that it is faithful is `yi eval reproduce-baro` against the published RE2-TT
+numbers (docs/ROADMAP.md).

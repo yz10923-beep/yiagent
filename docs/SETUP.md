@@ -114,6 +114,31 @@ the binding to 0.0.0.0.
    df -h ~ && docker system df           # disk after the load
    ```
 
+8. **The eval harness (S2).** No Elasticsearch needed: the graders and BARO read the
+   Parquet files. Nothing here costs money.
+
+   ```bash
+   cd ~/yiagent && git pull && uv sync && make verify
+   uv run yi eval metric-kinds --split dev           # metric families per system
+   uv run yi eval reproduce-baro --systems tt ob ss  # our BARO vs the published RE2-TT numbers
+   ```
+
+   Then review what you are approving (`git log -p -- src/yi_agent/eval`), and approve it
+   by scoring the oracle with the flag. Only you pass `--approve-harness`:
+
+   ```bash
+   uv run yi eval baseline oracle --split dev --approve-harness   # must print 1.00s
+   uv run yi eval baseline random --split dev
+   uv run yi eval baseline baro --split dev
+   uv run yi eval baseline shape-time --split dev
+   uv run yi eval baseline shape-columns --split dev
+   uv run yi eval evidence-coverage --split dev
+   cat evals/harness.sha256
+   ```
+
+   Send the hash so it is committed with the code it approves; before the next `git pull`,
+   `rm evals/harness.sha256` (the pulled copy replaces it).
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high
