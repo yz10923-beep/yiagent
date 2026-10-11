@@ -73,3 +73,28 @@ def test_clean_case_has_no_audit_hits(tmp_path: Path) -> None:
     result = AuditResult()
     audit_case(make_case(tmp_path, TT), result)
     assert "no hits" in result.render()
+
+
+def test_audit_ignores_the_false_positives_of_the_first_real_audit(tmp_path: Path) -> None:
+    d = make_case(tmp_path, TT)
+    lines = [
+        "at com.mongodb.connection.DefaultConnectionPool$PooledConnection.receiveMessage",
+        "JSR-330 'javax.inject.Inject' annotation found and supported for autowiring",
+        "TokenServiceImpl : eyJhbGciOiJIUzI1NiJ9.eyJ0YyI6InRjIiwiZGVsYXkiOjF9.sig tc delay",
+        "fault injected into the payment path",  # a real hit
+    ]
+    pq.write_table(
+        pa.table(
+            {
+                "timestamp": [ONSET_S] * len(lines),
+                "container_name": ["ts-auth-service"] * len(lines),
+                "message": lines,
+            }
+        ),
+        d / "logs.parquet",
+    )
+    result = AuditResult()
+    audit_case(d, result)
+    assert result.hits["fault"]["logs.message"] == [1, 1]
+    assert result.hits["inject"]["logs.message"] == [1, 1]
+    assert "network injector" not in result.hits

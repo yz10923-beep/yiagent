@@ -23,12 +23,12 @@ type Kind = Literal["logs", "traces", "metrics"]
 type Doc = dict[str, Any]
 
 KINDS: tuple[Kind, ...] = ("logs", "traces", "metrics")
-# Where a source's time may be, in order of preference. The README says logs carry an
-# int64 `timestamp`, but Train Ticket's logs have a string `timestamp` holding a time of
-# day ('12:02'), so the column is chosen from the values, not from the name.
+# Where a source's time may be, in order of preference, chosen from the values rather
+# than trusted by name: every system's traces have a `time` column holding 'HH:MM'
+# ('12:02'), with the real start in `startTime` (us) and `startTimeMillis` (VM, 2026-10-11).
 TIME_CANDIDATES: dict[Kind, tuple[str, ...]] = {
-    "logs": ("timestamp", "time", "@timestamp", "ts"),
-    "traces": ("time", "startTime", "timestamp"),
+    "logs": ("timestamp", "time"),
+    "traces": ("startTime", "startTimeMillis", "time", "timestamp"),
     "metrics": ("time",),
 }
 BATCH_ROWS = 10_000

@@ -66,17 +66,22 @@ def test_logs_become_one_doc_per_line_with_source_columns_only(tmp_path: Path) -
     stats = FileStats()
     docs = list(iter_docs("logs", d / "logs.parquet", stats))
     assert stats.rows == stats.docs == len(docs) == 5
-    assert stats.time_unit == "ns"
+    assert (stats.time_column, stats.time_unit) == ("timestamp", "s")
     assert set(docs[0]) == {"@timestamp", "timestamp", "container_name", "message"}
     assert docs[0]["@timestamp"] == ONSET_S * 1000
 
 
-def test_traces_keep_string_ids_and_drop_nan_fields(tmp_path: Path) -> None:
-    d = make_case(tmp_path, "re2ob_checkoutservice_cpu_1")
-    docs = list(iter_docs("traces", d / "traces.parquet", FileStats()))
+def test_traces_use_start_time_and_keep_string_ids_and_drop_nulls(tmp_path: Path) -> None:
+    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1")
+    stats = FileStats()
+    docs = list(iter_docs("traces", d / "traces.parquet", stats))
+    # The VM's first failure: `time` is 'HH:MM'; the start is `startTime`, in us.
+    assert (stats.time_column, stats.time_unit) == ("startTime", "us")
+    assert docs[0]["@timestamp"] == ONSET_S * 1000 + 1  # 952 us rounds up to 1 ms
+    assert docs[0]["time"] == "12:02"  # source columns are kept as they are
     assert [x["traceID"] for x in docs] == ["0001", "0001", "0002"]
     assert "parentSpanID" not in docs[0] and docs[1]["parentSpanID"] == "a"
-    assert "duration" not in docs[2]  # NaN: the field is absent, the span is kept
+    assert "methodName" not in docs[0] and "statusCode" not in docs[2]  # nulls: no field
 
 
 def test_iso_trace_times_load(tmp_path: Path) -> None:
@@ -96,20 +101,10 @@ def test_metrics_go_long_skipping_unobserved_and_nan_cells(tmp_path: Path) -> No
     assert {x["metric"] for x in docs} == {"frontend_cpu", "backend_latency-50", "backend_mem"}
 
 
-def test_a_time_of_day_string_loses_to_a_numeric_time_column(tmp_path: Path) -> None:
-    # The VM's first real failure: Train Ticket logs, `timestamp` = '12:02'.
-    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", log_time="tt")
-    stats = FileStats()
-    docs = list(iter_docs("logs", d / "logs.parquet", stats))
-    assert (stats.time_column, stats.time_unit) == ("time", "s")
-    assert len(docs) == 5 and docs[0]["@timestamp"] == ONSET_S * 1000
-    assert docs[0]["timestamp"] == "12:02"  # the source column is kept as it is
-
-
 def test_no_usable_time_column_is_a_clear_error(tmp_path: Path) -> None:
-    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", log_time="time-of-day-only")
+    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", trace_time="time-of-day-only")
     with pytest.raises(TelemetryError, match="no usable time column.*12:02"):
-        list(iter_docs("logs", d / "logs.parquet", FileStats()))
+        list(iter_docs("traces", d / "traces.parquet", FileStats()))
 
 
 def test_unparseable_strings_in_a_time_column_are_counted_not_fatal() -> None:
@@ -121,11 +116,11 @@ def test_unparseable_strings_in_a_time_column_are_counted_not_fatal() -> None:
 
 
 def test_inspect_never_raises_and_shows_the_raw_values(tmp_path: Path) -> None:
-    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", log_time="time-of-day-only")
+    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", trace_time="time-of-day-only")
     out = inspect_case(d)
-    assert "time candidate timestamp (string): ['12:02'" in out
-    assert "time column: ERROR" in out  # logs
-    assert "time column: time, unit ns" in out  # traces still fine
+    assert "time candidate time (string): ['12:02'" in out
+    assert "time column: ERROR" in out  # traces
+    assert "time column: timestamp, unit s" in out  # logs still fine
 
 
 def test_window_and_missing_sources(tmp_path: Path) -> None:

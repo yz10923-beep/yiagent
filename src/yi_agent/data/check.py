@@ -114,13 +114,16 @@ def inspect_case(case_dir: Path) -> str:
 
 # Things that would give the answer away if the agent could see them: the case's own name
 # (or any case name), and traces of the fault injector itself.
+# Patterns are RE2 (pyarrow), so no lookbehind. The first full audit (VM, 2026-10-11)
+# had only false positives, now excluded: "fault" inside "DefaultConnectionPool",
+# "javax.inject", and a loose `tc ... delay` that matched inside a JWT.
 LEAK_PATTERNS: dict[str, str] = {
     "case name": r"\bre[123](ob|ss|tt)_",
     "chaos": r"chaos",
     "stress tool": r"stress-ng|stressng|\bstress\b",
-    "network injector": r"toxiproxy|pumba|netem|tc qdisc|\btc\b.*\bdelay\b",
-    "inject": r"inject",
-    "fault": r"fault",
+    "network injector": r"toxiproxy|pumba|\bnetem\b|tc qdisc",
+    "inject": r"(^|[^.\w])inject(ed|ion|or|ing)?\b",
+    "fault": r"\bfault(s|y)?\b",
 }
 
 

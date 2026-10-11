@@ -21,9 +21,13 @@ def make_case(
     *,
     logs: bool = True,
     traces: bool = True,
-    trace_time: str = "ns",
-    log_time: str = "ns",
+    trace_time: str = "real",
 ) -> Path:
+    """The schemas are the real ones (`yi data inspect` on the VM, 2026-10-11): logs carry an
+    int64 `timestamp` in seconds; traces carry a useless `time` string ('12:02', HH:MM) and
+    the real start in `startTime` (us) and `startTimeMillis`; `statusCode` is null in Train
+    Ticket. trace_time="iso" replaces the trace times with ISO strings only;
+    "time-of-day-only" leaves only the HH:MM string, so no trace time is usable."""
     d = data_dir / name
     d.mkdir(parents=True)
     (d / "inject_time.txt").write_text(f"{ONSET_S}\n")
@@ -41,37 +45,36 @@ def make_case(
         d / "metrics.parquet",
     )
     if logs:
-        cols: dict[str, object] = {
-            "timestamp": pa.array([(ONSET_S + i) * 1_000_000_000 for i in range(5)]),
-            "container_name": ["frontend", "backend", "backend", "frontend", "backend"],
-            "message": [f"GET /cart 200 {i}ms" for i in range(4)] + ["ERROR timeout"],
-        }
-        if log_time in ("tt", "time-of-day-only"):
-            # Seen on the VM in Train Ticket's logs: `timestamp` = '12:02', a time of day.
-            # Whether a numeric time column sits beside it there is not known yet ("tt").
-            cols["timestamp"] = ["12:02", "12:02", "12:03", "12:03", "12:03"]
-        if log_time == "tt":
-            cols["time"] = pa.array([ONSET_S + i for i in range(5)], pa.int64())
-        pq.write_table(pa.table(cols), d / "logs.parquet")
-    if traces:
-        if trace_time == "iso":
-            tt: pa.Array = pa.array([f"2024-01-22T14:52:{5 + i:02d}" for i in range(3)])
-        else:
-            tt = pa.array([(ONSET_S + i) * 1_000_000_000 for i in range(3)], pa.int64())
         pq.write_table(
             pa.table(
                 {
-                    "time": tt,
-                    "traceID": ["0001", "0001", "0002"],  # leading zeros must survive
-                    "spanID": ["a", "b", "c"],
-                    "parentSpanID": [None, "a", None],
-                    "serviceName": ["frontend", "backend", "frontend"],
-                    "duration": [1500, 900, float("nan")],
-                    "statusCode": [200, 500, 200],
+                    "timestamp": pa.array([ONSET_S + i for i in range(5)], pa.int64()),
+                    "container_name": ["frontend", "backend", "backend", "frontend", "backend"],
+                    "message": [f"GET /cart 200 {i}ms" for i in range(4)] + ["ERROR timeout"],
                 }
             ),
-            d / "traces.parquet",
+            d / "logs.parquet",
         )
+    if traces:
+        start_us = [ONSET_S * 1_000_000 + i * 1_000_000 + 952 for i in range(3)]
+        cols: dict[str, object] = {
+            "time": ["12:02", "12:02", "12:03"],
+            "traceID": ["0001", "0001", "0002"],  # leading zeros must survive
+            "spanID": ["a", "b", "c"],
+            "serviceName": ["frontend", "backend", "frontend"],
+            "methodName": pa.array([None, None, None], pa.string()),
+            "operationName": ["GET /cart", "CartService/Get", "GET /"],
+            "parentSpanID": [None, "a", None],
+            "startTimeMillis": pa.array([u // 1000 for u in start_us], pa.int64()),
+            "startTime": pa.array(start_us, pa.int64()),
+            "duration": pa.array([1500, 900, 300], pa.int64()),
+            "statusCode": pa.array([0, 500, None], pa.int64()),
+        }
+        if trace_time in ("iso", "time-of-day-only"):
+            del cols["startTime"], cols["startTimeMillis"]
+        if trace_time == "iso":
+            cols["time"] = [f"2024-01-22T14:52:{5 + i:02d}" for i in range(3)]
+        pq.write_table(pa.table(cols), d / "traces.parquet")
     return d
 
 

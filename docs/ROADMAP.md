@@ -43,6 +43,24 @@ line item.
   1441 one-second metric rows, `inject_time` = `time_start` + 720 s (the fault sits in
   the middle), about 175K log lines and 400K spans. RE3: about 40-90K log lines and
   35-250K spans. Metrics are 69-376 columns named `{service}_{metric}`.
+- **Real schemas** (`yi data inspect` on the VM, 2026-10-11, one case per suite x system):
+  logs are `timestamp` (int64, **seconds**: many lines share one value; messages carry
+  their own ms times), `container_name`, `message`. Traces (OB, TT) are `time` (a string
+  'HH:MM', useless), `traceID`, `spanID`, `serviceName`, `methodName`, `operationName`,
+  `parentSpanID`, `startTimeMillis`, `startTime` (int64 **us**), `duration` (int64 us),
+  `statusCode` (null in TT, gRPC code 0 in OB). Metrics: `time` (s) plus
+  `{service}_{metric}` columns, `metric` in cpu, mem, latency-50, latency-90, ..., with
+  databases and queues as services too (`ts-auth-mongo`, `redis`, `rabbitmq`); TT has
+  316-360 columns, OB about 70-75, SS about 77-82.
+- **Sizes are larger than first assumed:** one RE2-TT case is 274K log lines, 898K spans
+  and 1441 x 360 metric cells, about 1.7M documents. RE2 windows are 24 min with the
+  onset at +720 s; RE3-TT's is 30 min with the onset at +900 s.
+- **`yi data check` (VM): 360 cases, 0 problems.** Every directory exists and
+  `cases.parquet` agrees with every case name (the name is the label, confirmed).
+- **Leak audit over all 360 cases (VM): no injector or label traces.** No `chaos`, no
+  `stress-ng`, no network-injector tool, no case name in any log line, span field or
+  metric name. Its only hits were false positives ("fault" in `DefaultConnectionPool`,
+  `javax.inject`, a loose pattern inside a JWT), now excluded and tested.
 - Some files are absent rather than empty: no `logs.parquet` for
   `re2tt_ts-auth-service_cpu_1`, and 13 RE3-SS cases had header-only CSVs in the source.
   A missing file means "source not available", never an error.
@@ -84,12 +102,18 @@ line item.
   taught "the answer is always ts-route-service"). Result: **dev 77, dev_small 24, test
   283** cases (sha256 `4d25c2e8...`). dev_small (one rep per dev group) is for cheap
   iteration; full dev confirms; test is run once.
-- **Load per trial.** Each trial loads its case into fresh indices `yi-<id>-{logs,traces,
-  metrics}` and deletes them after. It keeps disk small (one case is about 1M documents),
-  matches kama's fresh workspace, and means the agent's queries can only ever reach one
-  case. A `--keep` option exists for iterating on one case. Loading checks every count:
-  documents indexed must equal source rows, or the load fails (a silent drop would score
-  as an agent failure).
+- **Load once, keep, verify** (revised 2026-10-11 from "load per trial", after measuring).
+  A Train Ticket-sized case (1.7M documents) loads in 71 s with one bulk stream and
+  41 s with 3 parallel bulk threads and an async translog during the load (4-core cloud
+  container; expect slower on the VM), and takes about 140 MB on disk. Reloading it for
+  every trial would cost more than the trial; keeping all of dev costs 10-25 GB of 150.
+  So each case is loaded once into `yi-<id>-{logs,traces,metrics}`; each index records
+  `_meta` {loader version, complete, docs}, written last, and `ensure_loaded` reuses an
+  index only if the marker, the version and the live count all match, otherwise it
+  reloads. Isolation between cases comes from binding the agent's tools to one case id
+  (S3), not from deleting indices. Every load still checks that documents indexed equal
+  documents produced from the source rows (a silent drop would score as an agent
+  failure).
 - **Metrics in Elasticsearch too**, in long form (`@timestamp`, `metric`, `value`, one
   document per non-null cell). One store, one query language for the tools, and the ELK
   story; per-case metric volume (at most about 540K cells for Train Ticket) is small.
@@ -110,12 +134,20 @@ line item.
   `text`). Elasticsearch's default maps JSON decimals to 32-bit `float`, which would
   silently round large durations or times stored as doubles.
 
+## Ideas for S2 from S1
+
+- **A metadata-only baseline as a leak detector.** The metric column set differs by case
+  (OB 69-77 columns). If a model given only the column names, row counts and file sizes
+  beats chance on the root cause, the data's shape leaks the label and every score needs
+  that baseline next to it.
+
 ## S1 status
 
-Built and tested in the cloud container (no data there): 452 unit tests and 6
-Elasticsearch tests on synthetic cases in the real layout. Open until the VM run:
-`yi data check` agreeing with the frozen labels, `inspect` on the real schemas, the
-leak `audit` over all 360 cases, and timed loads of dev_small.
+First VM run (2026-10-11): `check` 0 problems, `inspect` gave the real schemas (the
+traces' 'HH:MM' `time` crashed the first reader; the time column is now chosen from the
+values), `audit` clean. The dev_small load looked stuck: it printed nothing until a case
+finished, and a Train Ticket case is 1.7M documents; it now prints progress and loads
+about 1.9x faster. Open: timed loads of dev_small on the VM, with disk use.
 
 ## Interview talking points
 

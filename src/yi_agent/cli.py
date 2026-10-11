@@ -12,7 +12,13 @@ from elasticsearch import Elasticsearch
 from yi_agent.config import ConfigError, Settings, load_settings
 from yi_agent.data.alert import make_alert
 from yi_agent.data.check import AuditResult, audit_case, check_download, inspect_case
-from yi_agent.data.es_load import LoadError, load_case, unload_case
+from yi_agent.data.es_load import (
+    LOADER_VERSION,
+    LoadError,
+    ensure_loaded,
+    load_case,
+    unload_case,
+)
 from yi_agent.data.rcaeval import LABELS_PATH, SPLIT_PATH, CaseLabel, fetch, read_labels
 from yi_agent.data.split import read_split, split_hash
 from yi_agent.data.telemetry import TelemetryError, read_window
@@ -96,10 +102,17 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
     labels = _labels()
     es = _es(settings)
     total_docs, total_s, failed = 0, 0.0, []
-    for i in _ids(args, labels):
+    ids = _ids(args, labels)
+    loader = ensure_loaded if args.keep else load_case
+
+    def progress(msg: str) -> None:
+        print(msg, file=sys.stderr, flush=True)
+
+    for n, i in enumerate(ids, 1):
         case_dir = settings.data_dir / labels[i].name
+        progress(f"[{n}/{len(ids)}] {i} ({labels[i].suite}-{labels[i].system}) ...")
         try:
-            report = load_case(es, i, case_dir)
+            report = loader(es, i, case_dir, progress)
         except (LoadError, TelemetryError) as e:
             print(f"{i}: FAILED {e}")
             failed.append(i)
@@ -108,10 +121,14 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
         total_s += report.seconds
         units = {k: f"{s.time_column}:{s.time_unit}" for k, s in report.stats.items()}
         skipped = sum(s.skipped_nonfinite + s.skipped_no_time for s in report.stats.values())
+        if report.reused:
+            print(f"{i}: {report.docs:>8} docs already loaded (complete, loader v{LOADER_VERSION})")
+            continue
         print(
             f"{i}: {report.docs:>8} docs in {report.seconds:5.1f}s "
             f"({report.docs / max(report.seconds, 1e-9):,.0f}/s) {report.indices} "
-            f"time units {units} skipped cells {skipped}"
+            f"time units {units} skipped cells {skipped}",
+            flush=True,
         )
         if args.show_alert:
             print(make_alert(labels[i], read_window(case_dir)).render())
@@ -151,7 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
         c.add_argument("ids", nargs="*", help="case ids (default: the whole --split)")
         c.add_argument("--split", choices=SPLITS, default="dev_small")
         if name == "load":
-            c.add_argument("--keep", action="store_true", help="leave the indices loaded")
+            c.add_argument(
+                "--keep",
+                action="store_true",
+                help="keep the indices, and reuse a complete earlier load instead of reloading",
+            )
             c.add_argument("--show-alert", action="store_true")
         c.set_defaults(fn=fn)
     c = data.add_parser("unload", help="delete a case's indices")

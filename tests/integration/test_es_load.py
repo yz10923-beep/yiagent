@@ -12,7 +12,7 @@ from elasticsearch import Elasticsearch
 
 from tests.rcaeval_fixture import ONSET_S, SECRET, make_case
 from yi_agent.data import es_load, telemetry
-from yi_agent.data.es_load import LoadError, index_name, load_case, unload_case
+from yi_agent.data.es_load import LoadError, ensure_loaded, index_name, load_case, unload_case
 from yi_agent.data.rcaeval import parse_case_name
 
 pytestmark = pytest.mark.es
@@ -55,11 +55,10 @@ def test_case_loads_into_fresh_indices_with_every_document(
         query={"range": {"@timestamp": {"gte": ONSET_S * 1000}}},
     )
     assert after["count"] == 3 * 31  # 31 rows from the onset on; the null and NaN cells are earlier
-    # decimals stay 64-bit: a 32-bit float would round large durations or times
     mapping = es.indices.get_mapping(index=index_name(CASE_ID, "traces"))
     props = mapping[index_name(CASE_ID, "traces")]["mappings"]["properties"]
-    assert props["duration"]["type"] == "double"
     assert props["traceID"]["type"] == "keyword"
+    assert props["startTime"]["type"] == "long"  # us since the epoch: needs 64 bits
     # nothing from the directory: no name, no root_cause.txt
     for kind in ("logs", "traces"):
         for q in (NAME, SECRET):
@@ -67,6 +66,40 @@ def test_case_loads_into_fresh_indices_with_every_document(
                 index=index_name(CASE_ID, kind), query={"query_string": {"query": f'"{q}"'}}
             )
             assert r["count"] == 0
+
+
+def test_decimals_are_mapped_as_double_not_float(es: Elasticsearch) -> None:
+    # Elasticsearch's default maps JSON decimals to 32-bit float, which rounds silently.
+    name = index_name(CASE_ID, "traces")
+    es.indices.create(index=name, mappings=es_load.MAPPINGS["traces"])
+    es.index(index=name, document={"@timestamp": ONSET_S * 1000, "ratio": 0.123456789012})
+    props = es.indices.get_mapping(index=name)[name]["mappings"]["properties"]
+    assert props["ratio"]["type"] == "double"
+
+
+def test_a_complete_load_is_reused_and_an_unfinished_one_is_not(
+    es: Elasticsearch, tmp_path: Path
+) -> None:
+    d = make_case(tmp_path, NAME)
+    first = ensure_loaded(es, CASE_ID, d)
+    assert not first.reused and first.docs == 5 + 3 + 172
+    again = ensure_loaded(es, CASE_ID, d)
+    assert again.reused and again.indices == first.indices
+    # An index without the completion marker (a load that died) is reloaded.
+    es.indices.put_mapping(index=index_name(CASE_ID, "logs"), meta={})
+    assert not ensure_loaded(es, CASE_ID, d).reused
+    # So is one from another loader version.
+    es.indices.put_mapping(
+        index=index_name(CASE_ID, "metrics"),
+        meta={"yi_loader": es_load.LOADER_VERSION + 1, "complete": True, "docs": 172},
+    )
+    assert not ensure_loaded(es, CASE_ID, d).reused
+    # And one whose count no longer matches its marker.
+    es.delete_by_query(
+        index=index_name(CASE_ID, "logs"), query={"match_all": {}}, refresh=True, max_docs=1
+    )
+    assert not ensure_loaded(es, CASE_ID, d).reused
+    assert ensure_loaded(es, CASE_ID, d).reused
 
 
 def test_reload_replaces_and_unload_deletes(es: Elasticsearch, tmp_path: Path) -> None:

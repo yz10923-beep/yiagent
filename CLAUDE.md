@@ -125,10 +125,10 @@ Done in S1 so far (decisions in `docs/ROADMAP.md`, "S1 decisions"):
   (no name, no path, no root_cause.txt). 452 unit + 6 Elasticsearch tests.
 
 Not done yet, in order:
-1. **S1 on the VM (Yi):** `yi data fetch`, `check`, `inspect`, `audit`, `load` (commands
-   in `docs/SETUP.md`, step 7). Then **S1 phase 2** from that output: fix anything the
-   real schemas break (time units, column names), act on audit hits (e.g. drop injector
-   containers' logs, documented), record per-case load time and size, close S1.
+1. **S1 on the VM (Yi):** done so far: fetch, `check` (0 problems), `inspect` (real
+   schemas, in ROADMAP), `audit` (clean). Left: `yi data load --split dev_small --keep`
+   timed on the VM, with disk use; then record the numbers and close S1. Loading is now
+   load-once-and-keep (`ensure_loaded`, ROADMAP "S1 decisions").
 2. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
    selftest inside `make verify`; BARO scored on dev. Find out what RE3's F1-F5 mean
    (from the paper; the data only says "code-level fault F1"). The Hugging Face copy has
