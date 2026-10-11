@@ -87,7 +87,9 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S0 done (checked on the VM 2026-10-11, gaps closed); next: S1 (data).**
+**Current stage: S1 code done in the cloud container (2026-10-11); next: S1 on the VM
+(Yi runs the commands below and sends the output), then S1 phase 2 from what the real
+data shows, then S2.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -111,13 +113,22 @@ Done in S0:
 - Docs: `README.md`, `docs/SETUP.md` (what runs where, VM sizing and steps,
   troubleshooting), `docs/ROADMAP.md` (stages, data facts, open decisions).
 
+Done in S1 so far (decisions in `docs/ROADMAP.md`, "S1 decisions"):
+- `yi data fetch|check|inspect|audit|load|unload` (`src/yi_agent/cli.py`).
+- Labels frozen in `evals/grader/labels.json` (360 cases, opaque ids `c` + 10 hex), the
+  grouped stratified split in `evals/split.json` (dev 77, dev_small 24, test 283); both
+  sha256-pinned in `tests/unit/test_split.py`.
+- Telemetry reader (time unit detected per column, metrics in long form, NaN/null
+  counted), loader into `yi-<id>-{logs,traces,metrics}` with every count verified and
+  cleanup on failure; alert (onset = inject_time, as the baselines get).
+- Leakage tests: the alert over all 360 real cases, index names, loaded documents
+  (no name, no path, no root_cause.txt). 452 unit + 6 Elasticsearch tests.
+
 Not done yet, in order:
-1. **S1 (data):** `yi data fetch` (Hugging Face `snapshot_download` of `re2*`, `re3*` and
-   `cases.parquet` into `YI_DATA_DIR`, run on the VM); a case schema; label blinding
-   (opaque case ids, labels in a grader-only file); a leakage test; a frozen, stratified,
-   seeded dev/test split with its hash pinned in a test; loading a case into
-   Elasticsearch indices named by opaque id. Make and record the open S1 decisions in
-   ROADMAP first.
+1. **S1 on the VM (Yi):** `yi data fetch`, `check`, `inspect`, `audit`, `load` (commands
+   in `docs/SETUP.md`, step 7). Then **S1 phase 2** from that output: fix anything the
+   real schemas break (time units, column names), act on audit hits (e.g. drop injector
+   containers' logs, documented), record per-case load time and size, close S1.
 2. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
    selftest inside `make verify`; BARO scored on dev. Find out what RE3's F1-F5 mean
    (from the paper; the data only says "code-level fault F1"). The Hugging Face copy has
@@ -170,7 +181,11 @@ Not done yet, in order:
 - The cloud dev container: Hugging Face downloads are blocked (proxy 403); Docker works
   after `sudo dockerd &`; Elastic's image registry is blocked but Docker Hub is not
   (hence the `elasticsearch:9.1.0` image); its disk looks >90% used to ES, so disable
-  the disk threshold there (`docs/SETUP.md`), never on the VM.
+  the disk threshold there (`docs/SETUP.md`), never on the VM. It also can't raise
+  rlimits: start ES with a scratch override `services: {elasticsearch: {ulimits: !reset
+  {}}}` (`docker compose -f docker-compose.yml -f <override> up -d elasticsearch`); never
+  change the repo's compose file for it. The Hugging Face connector can read the
+  dataset's README, file listing and `cases.parquet` rows, though downloads are blocked.
 - Git: one long-lived working branch for everything (Yi's rule, 2026-10-11, as in kama):
   all work goes to branch `claude/jolly-euler-45xyyc` only. The first two commits are
   also on `main`. On the VM: `git fetch origin && git checkout claude/jolly-euler-45xyyc`.
@@ -183,6 +198,7 @@ make verify              # ruff lint + format check, mypy --strict, pytest (no n
 make es-up / es-down     # local Elasticsearch in Docker (127.0.0.1:9200)
 make es-test             # Elasticsearch integration tests (marker `es`)
 make live                # real-API tests (needs ANTHROPIC_API_KEY; costs money)
+uv run yi data --help    # fetch, check, inspect, audit, load, unload (data commands run on the VM)
 ```
 
 Settings (`config.load_settings()`): `~/.yi/.env`, then `./.env`, then env vars (later
@@ -198,9 +214,15 @@ src/yi_agent/
   config.py   settings: ~/.yi/.env -> ./.env -> env vars                           (from kama)
   context.py  ContextMeter: request sizes exact from usage, the tail estimated     (vendored)
   outputs.py  OutputStore and cut(): results over the cap saved whole              (vendored)
+  cli.py      `yi data ...`
+  data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
+              es_load (fresh indices per case, counts verified), alert, check (VM audits)
+evals/grader/labels.json  id -> label; harness and graders only, never the agent
+evals/split.json          frozen dev / dev_small / test ids (hash pinned)
 tests/unit/          fast, no network
 tests/integration/   need Elasticsearch (marker `es`)
 tests/fakes.py       ScriptedProvider etc. for loop tests (from kama)
+tests/rcaeval_fixture.py  tiny synthetic cases in the real on-disk layout
 docs/                ROADMAP.md, SETUP.md
 scripts/wait_es.sh   readiness wait for make es-up
 ```

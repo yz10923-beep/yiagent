@@ -100,7 +100,19 @@ Security is off in this compose file (no TLS, no auth) because nothing is expose
 both ports bind to 127.0.0.1. **Never open 9200 or 5601 in the firewall** or change
 the binding to 0.0.0.0.
 
-The data download (`yi data fetch`) arrives with S1; nothing to download yet.
+7. **The data (S1)**, about 3 GB into `YI_DATA_DIR` (default `~/yi-data`). Each command
+   prints what to send back; none of them costs money.
+
+   ```bash
+   cd ~/yiagent && git pull && uv sync && make verify
+   make es-up
+   uv run yi data fetch                  # resumable; rerun if interrupted
+   uv run yi data check                  # download vs frozen labels; expect 0 problems
+   uv run yi data inspect                # real schemas and time units, one case per system
+   uv run yi data audit --split all      # anything in the telemetry that could leak the answer
+   uv run yi data load --split dev_small --show-alert   # load, verify, unload, timed
+   df -h ~ && docker system df           # disk after the load
+   ```
 
 ## Troubleshooting
 

@@ -39,7 +39,16 @@ line item.
   (RE3-TT has 2 root-cause services, RE3-OB 4; reps vary 3-6; F5 only in OB).
 - Sock Shop (SS) has metrics and logs but **no traces**. `re2tt_ts-auth-service_cpu_1`
   has no logs.
-- One case is a 24-30 minute window: about 40-90K log lines and 35-250K spans (RE3).
+- One case is a 24-30 minute window. RE2-OB (index rows 380-382): exactly 24 minutes,
+  1441 one-second metric rows, `inject_time` = `time_start` + 720 s (the fault sits in
+  the middle), about 175K log lines and 400K spans. RE3: about 40-90K log lines and
+  35-250K spans. Metrics are 69-376 columns named `{service}_{metric}`.
+- Some files are absent rather than empty: no `logs.parquet` for
+  `re2tt_ts-auth-service_cpu_1`, and 13 RE3-SS cases had header-only CSVs in the source.
+  A missing file means "source not available", never an error.
+- **RCAEval's baselines are given the injection time.** `main.py` reads `inject_time.txt`
+  (plus `--tdelta`, default 0) and passes it to every method, and cuts the window as
+  `length/2` before and after it. Perfect anomaly detection is the benchmark's protocol.
 - The index's `fault_description` for RE3 is only "code-level fault F1" etc. What F1-F5
   are must come from the paper before S2 defines classes.
 - **There is no root-cause indicator column** in the Hugging Face copy (the paper
@@ -48,15 +57,59 @@ line item.
 - The Hugging Face download is blocked from the cloud dev container (proxy 403); fetch
   on the VM.
 
-## S1 decisions to make
+## S1 decisions (made 2026-10-11)
 
-- **What the agent is told.** An alert with a time window, not `inject_time` itself
-  (a real alert fires some time after the fault). Window and delay: decide, write down.
-- **Split.** Stratified by dataset x system x fault, seeded. Dev small enough for cheap
-  iteration (about 50 cases), test the rest, touched only in S5.
-- **Load per trial or once.** Per trial (fresh indices, deleted after) mirrors kama's
-  fresh workspace and keeps disk small; loading all 360 once is faster for repeat runs.
-- **Metrics.** Elasticsearch too (one store, the ELK story) or DuckDB over Parquet.
+- **What the agent is told: the onset time, as the baselines are.** The alert gives the
+  case's opaque id, the system's name, which sources exist, the telemetry window and the
+  anomaly onset = `inject_time`. That is exactly what BARO gets, so "does the agent beat
+  BARO" compares like with like. A late, noisy alert (onset + a seeded delay) is a harder
+  condition for S4, the analogue of RCAEval's `--tdelta`, not the default. The alert names
+  no service and no symptom: a symptom ("frontend p99 high") would have to be derived
+  from the data and could point at the answer.
+- **Opaque ids:** `c` + the first 10 hex of sha256(salt + case name). Deterministic, so
+  the split and the labels are reproducible; not secret against someone holding the repo,
+  which the agent never does (its tools are read-only telemetry queries).
+- **Labels and split are committed** under `evals/`: `evals/grader/labels.json` (id ->
+  case name, suite, system, service, fault, rep; read by the harness and graders only)
+  and `evals/split.json` (ids only, sha256 pinned in a test). On the VM, `yi data check`
+  verifies that the download agrees with them: same case names, and `cases.parquet`'s
+  `root_cause_service` and `fault` equal to what the names say.
+- **Split: grouped and stratified, seeded (20261011).** A group is (suite, system,
+  service, fault); all its repetitions go to the same side, because two reps of the same
+  injection are near-duplicates and tuning on one while testing on another overstates
+  the result. RE2: one of the 5 groups of every (system, fault) goes to dev (18 groups,
+  54 cases). RE3 (not a grid): 2 groups per system with distinct faults and distinct
+  root-cause services, from faults with at least 2 groups so every fault keeps a test
+  group (a first draw put both RE3-TT dev groups on ts-route-service; dev would have
+  taught "the answer is always ts-route-service"). Result: **dev 77, dev_small 24, test
+  283** cases (sha256 `4d25c2e8...`). dev_small (one rep per dev group) is for cheap
+  iteration; full dev confirms; test is run once.
+- **Load per trial.** Each trial loads its case into fresh indices `yi-<id>-{logs,traces,
+  metrics}` and deletes them after. It keeps disk small (one case is about 1M documents),
+  matches kama's fresh workspace, and means the agent's queries can only ever reach one
+  case. A `--keep` option exists for iterating on one case. Loading checks every count:
+  documents indexed must equal source rows, or the load fails (a silent drop would score
+  as an agent failure).
+- **Metrics in Elasticsearch too**, in long form (`@timestamp`, `metric`, `value`, one
+  document per non-null cell). One store, one query language for the tools, and the ELK
+  story; per-case metric volume (at most about 540K cells for Train Ticket) is small.
+  `metric` keeps the column name whole: splitting `{service}_{metric}` safely needs the
+  real column names, which S1 inspects on the VM first.
+- **Timestamps are normalized to epoch milliseconds** in `@timestamp`, the unit detected
+  per column from the values (s, ms, us or ns by magnitude; ISO strings parsed), and the
+  detected unit is reported, because the README does not say what unit logs and traces
+  use.
+- **Never loaded:** `root_cause.txt` (it is the answer), file paths, the case name.
+- **Decimals are mapped as `double`**, strings as `keyword` (log `message` also as
+  `text`). Elasticsearch's default maps JSON decimals to 32-bit `float`, which would
+  silently round large durations or times stored as doubles.
+
+## S1 status
+
+Built and tested in the cloud container (no data there): 452 unit tests and 6
+Elasticsearch tests on synthetic cases in the real layout. Open until the VM run:
+`yi data check` agreeing with the frozen labels, `inspect` on the real schemas, the
+leak `audit` over all 360 cases, and timed loads of dev_small.
 
 ## Interview talking points
 

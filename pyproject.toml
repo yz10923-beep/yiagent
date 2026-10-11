@@ -9,9 +9,15 @@ description = "An incident-triage agent over logs, metrics and traces, with a fr
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "anthropic>=0.60",
+    "elasticsearch>=9,<10",
+    "huggingface-hub>=0.30",
+    "pyarrow>=17",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
 ]
+
+[project.scripts]
+yi = "yi_agent.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yi_agent"]
@@ -52,3 +58,7 @@ markers = [
     "live: calls the real LLM API (costs money); run with `make live`",
     "es: needs a running Elasticsearch (YI_ES_URL); run with `make es-test`",
 ]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
