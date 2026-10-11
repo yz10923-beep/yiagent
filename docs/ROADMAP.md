@@ -143,6 +143,28 @@ line item.
 
 ## S1 status
 
+**S1 closed (2026-10-11).** The done-criteria hold: cases load into fresh indices with
+opaque names, the leakage tests pass, the split's hash is pinned.
+
+dev_small on the VM (DigitalOcean, 4 shared vCPU, 7.8 GB, ES heap 2 GB):
+`yi data load --split dev_small --keep` loaded all 24 cases with every count verified and
+no failures, in **17 min 27 s** (17.7M documents, 2.2 GB on disk, all indices green;
+3.6 GB RAM still available with Elasticsearch up; disk 9% used).
+
+| suite-system | cases | documents per case | MB per case | sources |
+|---|---|---|---|---|
+| re2-ob | 6 | 656K-691K | 76-80 | logs, traces, metrics |
+| re2-ss | 6 | 195K-205K | 18-22 | logs, metrics |
+| re2-tt | 6 | 1.41M-2.10M | 189-298 | logs, traces, metrics |
+| re3-ob | 2 | 330K-342K | 33-34 | logs, traces, metrics |
+| re3-ss | 2 | 196K-199K | 18-19 | logs, metrics |
+| re3-tt | 2 | 641K-813K | 44-71 | logs, traces, metrics |
+
+The VM indexes at about 15-17K documents/s (the cloud container did 41K): a Train Ticket
+case takes about 110 s. Extrapolated, all 360 cases would be about 4.4 h and 33 GB, so
+loading once and keeping (the revised decision) is the right one; full dev (77 cases) is
+about 1 h and 7 GB once.
+
 First VM run (2026-10-11): `check` 0 problems, `inspect` gave the real schemas (the
 traces' 'HH:MM' `time` crashed the first reader; the time column is now chosen from the
 values), `audit` clean. The dev_small load looked stuck: it printed nothing until a case
@@ -152,3 +174,24 @@ about 1.9x faster. Open: timed loads of dev_small on the VM, with disk use.
 ## Interview talking points
 
 (Filled in as each stage closes, with numbers.)
+
+**S1 (data).**
+- *The labels are in the file names.* RCAEval's case directories are named
+  `re2tt_ts-order-service_cpu_1`; one leaked name and every score is meaningless. The
+  agent only ever sees opaque ids (`c944ccf91d8`); the alert is checked for every
+  service and fault name over all 360 cases; the loaded documents are checked for paths
+  and for `root_cause.txt`; and a scan of all 360 cases' telemetry for fault-injector
+  traces (chaos tools, stress-ng, case names) came back clean.
+- *A grouped split.* Repetitions of the same injection are near-duplicates, so all of
+  them sit on one side; tuning on rep 1 and testing on rep 2 would inflate the score.
+  A first draw also put both RE3 Train Ticket dev groups on the same root-cause service,
+  which would have taught the prompt "the answer is ts-route-service"; the split now
+  requires distinct services.
+- *Same information as the baseline.* RCAEval hands its baselines the injection time,
+  so the agent's alert carries it too; a late alert is a separate, harder condition.
+- *Verify end to end, measure before deciding.* Every load must count exactly the
+  documents it produced, or it fails (the Citi lesson: a pipeline that dropped 100% of
+  events while every service was green). The README's schema was wrong (traces' `time`
+  is 'HH:MM'), which a real-data `inspect` caught before any agent ran. "Load per trial"
+  was the plan until a Train Ticket case measured 1.7M documents and about 110 s on the
+  VM; at 33 GB for all cases, loading once with a verified completion marker won.

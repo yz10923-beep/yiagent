@@ -87,9 +87,7 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S1 code done in the cloud container (2026-10-11); next: S1 on the VM
-(Yi runs the commands below and sends the output), then S1 phase 2 from what the real
-data shows, then S2.**
+**Current stage: S1 closed (2026-10-11); next: S2 (the eval harness, before the agent).**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -113,7 +111,7 @@ Done in S0:
 - Docs: `README.md`, `docs/SETUP.md` (what runs where, VM sizing and steps,
   troubleshooting), `docs/ROADMAP.md` (stages, data facts, open decisions).
 
-Done in S1 so far (decisions in `docs/ROADMAP.md`, "S1 decisions"):
+Done in S1 (decisions in `docs/ROADMAP.md`, "S1 decisions"):
 - `yi data fetch|check|inspect|audit|load|unload` (`src/yi_agent/cli.py`).
 - Labels frozen in `evals/grader/labels.json` (360 cases, opaque ids `c` + 10 hex), the
   grouped stratified split in `evals/split.json` (dev 77, dev_small 24, test 283); both
@@ -122,19 +120,19 @@ Done in S1 so far (decisions in `docs/ROADMAP.md`, "S1 decisions"):
   counted), loader into `yi-<id>-{logs,traces,metrics}` with every count verified and
   cleanup on failure; alert (onset = inject_time, as the baselines get).
 - Leakage tests: the alert over all 360 real cases, index names, loaded documents
-  (no name, no path, no root_cause.txt). 452 unit + 6 Elasticsearch tests.
+  (no name, no path, no root_cause.txt). 456 unit + 8 Elasticsearch tests.
+- On the VM: `check` 0 problems, `inspect` (real schemas: traces' `time` is 'HH:MM', the
+  start is `startTime` in us), leak `audit` over all 360 cases clean, dev_small (24
+  cases, 17.7M documents, 2.2 GB) loaded and verified in 17.5 min. Loading is
+  load-once-and-keep (`ensure_loaded`). Numbers and decisions in ROADMAP ("S1 status").
 
 Not done yet, in order:
-1. **S1 on the VM (Yi):** done so far: fetch, `check` (0 problems), `inspect` (real
-   schemas, in ROADMAP), `audit` (clean). Left: `yi data load --split dev_small --keep`
-   timed on the VM, with disk use; then record the numbers and close S1. Loading is now
-   load-once-and-keep (`ensure_loaded`, ROADMAP "S1 decisions").
-2. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
+1. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
    selftest inside `make verify`; BARO scored on dev. Find out what RE3's F1-F5 mean
    (from the paper; the data only says "code-level fault F1"). The Hugging Face copy has
    no root-cause indicator column (only 8 RE3 Sock Shop cases ship `root_cause.txt`), so
    S2 writes its own expected-evidence rules per fault type and documents them.
-3. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
+2. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
 

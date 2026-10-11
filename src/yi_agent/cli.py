@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from collections import Counter
 from collections.abc import Sequence
 
+from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import Elasticsearch
 
 from yi_agent.config import ConfigError, Settings, load_settings
@@ -182,13 +184,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # Progress goes to stderr, unbuffered; through `| tee` stdout would be block-buffered
+    # and each case's result and alert would print after the next case's progress.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     args = build_parser().parse_args(argv)
     try:
         settings = load_settings()
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 2
-    rc: int = args.fn(settings, args)
+    try:
+        rc: int = args.fn(settings, args)
+    except ESConnectionError:
+        print(
+            f"Elasticsearch not reachable at {settings.es_url}: run `make es-up`", file=sys.stderr
+        )
+        return 2
     return rc
 
 
