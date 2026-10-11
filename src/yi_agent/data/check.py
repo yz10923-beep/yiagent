@@ -53,7 +53,9 @@ def check_download(data_dir: Path, labels: list[CaseLabel]) -> list[str]:
         has = source_paths(d)
         for kind, flag in (("logs", "has_logs"), ("traces", "has_traces")):
             if (kind in has) != bool(r[flag]):
-                problems.append(f"{c.name}: {kind}.parquet present={kind in has}, index {flag}={r[flag]}")
+                problems.append(
+                    f"{c.name}: {kind}.parquet present={kind in has}, index {flag}={r[flag]}"
+                )
     return problems
 
 

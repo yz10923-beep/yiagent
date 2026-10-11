@@ -83,7 +83,9 @@ def make_split(labels: list[CaseLabel], seed: int = SPLIT_SEED) -> Split:
             small.append(min(cases, key=lambda c: c.rep).id)
         else:
             test += [c.id for c in cases]
-    return Split(seed=seed, salt=ID_SALT, dev=sorted(dev), dev_small=sorted(small), test=sorted(test))
+    return Split(
+        seed=seed, salt=ID_SALT, dev=sorted(dev), dev_small=sorted(small), test=sorted(test)
+    )
 
 
 def split_json(split: Split) -> str:

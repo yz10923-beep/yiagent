@@ -75,9 +75,7 @@ def parse_case_name(name: str) -> CaseLabel:
 
 def labels_from_names(names: list[str]) -> list[CaseLabel]:
     """RE2 and RE3 cases only, sorted by name; fails on an id collision."""
-    labels = sorted(
-        (parse_case_name(n) for n in names if n[:3] in SUITES), key=lambda c: c.name
-    )
+    labels = sorted((parse_case_name(n) for n in names if n[:3] in SUITES), key=lambda c: c.name)
     ids = [c.id for c in labels]
     if len(set(ids)) != len(ids):
         raise ValueError("case id collision; change ID_SALT")

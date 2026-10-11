@@ -35,7 +35,10 @@ MAPPINGS: dict[Kind, dict[str, Any]] = {
         "properties": {
             "@timestamp": _DATE,
             # full-text search, plus the exact line for grouping and counting
-            "message": {"type": "text", "fields": {"raw": {"type": "keyword", "ignore_above": 2048}}},
+            "message": {
+                "type": "text",
+                "fields": {"raw": {"type": "keyword", "ignore_above": 2048}},
+            },
         },
     },
     "traces": {
@@ -44,7 +47,11 @@ MAPPINGS: dict[Kind, dict[str, Any]] = {
     },
     "metrics": {
         "dynamic": "strict",
-        "properties": {"@timestamp": _DATE, "metric": {"type": "keyword"}, "value": {"type": "double"}},
+        "properties": {
+            "@timestamp": _DATE,
+            "metric": {"type": "keyword"},
+            "value": {"type": "double"},
+        },
     },
 }
 # One node: replicas could never be placed. Refresh is off while loading, on after.
@@ -75,7 +82,9 @@ class LoadReport:
 def unload_case(es: Elasticsearch, case_id: str) -> None:
     # Explicit names: wildcard deletes are refused by default (destructive_requires_name).
     es.indices.delete(
-        index=[index_name(case_id, k) for k in KINDS], ignore_unavailable=True, allow_no_indices=True
+        index=[index_name(case_id, k) for k in KINDS],
+        ignore_unavailable=True,
+        allow_no_indices=True,
     )
 
 
