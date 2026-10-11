@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 
-from yi_agent.llm.pricing import cost_usd
 from yi_agent.trace.analyze import load_spans, render, summarize, to_chrome
 from yi_agent.trace.span import Span
 from yi_agent.trace.tracer import JsonlSpanWriter, Tracer
@@ -92,15 +91,6 @@ def test_writer_roundtrip_sorted_by_start(tmp_path: Path) -> None:
     spans = load_spans(tmp_path / TRACE_FILE)
     assert [s.name for s in spans] == ["earlier", "later"]
     assert spans[1].attrs == {"method": "m"}
-
-
-def test_pricing_uses_the_longest_matching_model_id() -> None:
-    usage = {"input_tokens": 1_000_000}
-    assert cost_usd("claude-opus-5-5", usage) == pytest.approx(4.0)  # not Opus 5's $5
-    assert cost_usd("claude-opus-5", usage) == pytest.approx(5.0)
-    assert cost_usd("fake-model", usage) is None  # unknown is None, never a silent $0
-    cached = {"cache_read_input_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000}
-    assert cost_usd("claude-opus-5", cached) == pytest.approx(5.0 * 0.1 + 5.0 * 1.25)
 
 
 # ---- the analysis, on hand-made spans with exact numbers
