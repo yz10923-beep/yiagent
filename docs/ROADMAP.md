@@ -17,8 +17,15 @@ Evals come before the agent: S2 grades a null and an oracle answer before S3 exi
 
 Done criteria met on the VM (DigitalOcean, Ubuntu 24.04, 4 vCPU, 8 GB, 150 GB free):
 `make verify` green (37 unit tests), `make es-up && make es-test` green, Kibana up,
-Hugging Face reachable. Left over, done before S1: the config loader and current-model
-prices (CLAUDE.md, Status).
+Hugging Face reachable. Then the two gaps, closed in the cloud container: the config
+loader, and a pricing table rewritten from the live pricing page (per-model cache-read
+rates, Haiku 5.5's long-prompt card, exact model-id matching); 54 unit tests.
+
+Talking point: a cost number is only as good as its price table. Checking it against
+the published page found the vendored table overpriced Opus 5.5 cache reads 2x (a flat
+0.1x multiplier where the real rate is 0.05x) and priced unknown newer models by prefix.
+In an agent loop most input tokens are cache reads, so that error lands on the biggest
+line item.
 
 ## Facts about the data (checked 2026-10-11)
 

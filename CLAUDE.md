@@ -87,8 +87,7 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S0 done (checked on the VM 2026-10-11); next: the small S0 gaps, then S1
-(data).**
+**Current stage: S0 done (checked on the VM 2026-10-11, gaps closed); next: S1 (data).**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -103,26 +102,28 @@ Done in S0:
   `/root/yiagent`): `make verify` 37 passed, `make es-up` + `make es-test` passed with the
   `ulimits` block as is, Kibana starts, Hugging Face reachable (HTTP 200). RAM is at the
   8 GB minimum: run Kibana only while using it.
+- S0 gaps closed: `config.py` (kama's loader: `~/.yi/.env`, then `./.env`, then env vars;
+  expands `~`). `llm/pricing.py` rewritten from the live pricing page (2026-10-11): every
+  rate stored as published, because cache reads are 0.05x input on Opus 5.5 and Sonnet 5.5
+  and 0.025x on Fable 5.1 (kama's flat 0.1x overpriced them); Haiku 5.5's second rate card
+  over a 100K-token prompt; exact id (or id + snapshot date) matching, because prefix
+  matching priced any unlisted `claude-sonnet-5-*` as Sonnet 5. 54 unit tests.
 - Docs: `README.md`, `docs/SETUP.md` (what runs where, VM sizing and steps,
   troubleshooting), `docs/ROADMAP.md` (stages, data facts, open decisions).
 
 Not done yet, in order:
-1. **Small S0 gaps:** no config loader yet (only `.env.example`; settings should load
-   `~/.yi/.env`, then `./.env`, then env vars, as kama's `config.py` did).
-   `llm/pricing.py` lacks current models (Sonnet 5.5, Haiku 5.5): look prices up with
-   the claude-api skill, never guess; until then their cost is None ("unknown"), never $0.
-2. **S1 (data):** `yi data fetch` (Hugging Face `snapshot_download` of `re2*`, `re3*` and
+1. **S1 (data):** `yi data fetch` (Hugging Face `snapshot_download` of `re2*`, `re3*` and
    `cases.parquet` into `YI_DATA_DIR`, run on the VM); a case schema; label blinding
    (opaque case ids, labels in a grader-only file); a leakage test; a frozen, stratified,
    seeded dev/test split with its hash pinned in a test; loading a case into
    Elasticsearch indices named by opaque id. Make and record the open S1 decisions in
    ROADMAP first.
-3. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
+2. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
    selftest inside `make verify`; BARO scored on dev. Find out what RE3's F1-F5 mean
    (from the paper; the data only says "code-level fault F1"). The Hugging Face copy has
    no root-cause indicator column (only 8 RE3 Sock Shop cases ship `root_cause.txt`), so
    S2 writes its own expected-evidence rules per fault type and documents them.
-4. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
+3. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
 
@@ -156,7 +157,7 @@ Not done yet, in order:
   (use tool calls), a fixed minimum number of rounds, a fixed sliding window instead of
   measured context management.
 - **Lessons from kama's measurements worth reusing:** with prompt caching a long context
-  is cheap to keep (cache reads cost 0.1x), so compaction costs more than it saves
+  is cheap to keep (cache reads cost 0.1x input, 0.05x on Opus 5.5 and Sonnet 5.5), so compaction costs more than it saves
   unless the context is large relative to the summary; chars/3 token estimates ran
   11-21% low on dense JSON, so calibrate from real usage; a variant is one condition,
   and infra failures are never scores.
@@ -184,9 +185,9 @@ make es-test             # Elasticsearch integration tests (marker `es`)
 make live                # real-API tests (needs ANTHROPIC_API_KEY; costs money)
 ```
 
-Settings (loader not written yet, see Status): `~/.yi/.env`, then `./.env`, then env
-vars: `ANTHROPIC_API_KEY`, `YI_DATA_DIR` (benchmark data, outside the repo), `YI_ES_URL`,
-`YI_ES_HEAP`.
+Settings (`config.load_settings()`): `~/.yi/.env`, then `./.env`, then env vars (later
+wins): `ANTHROPIC_API_KEY`, `YI_DATA_DIR` (benchmark data, outside the repo), `YI_ES_URL`.
+`YI_ES_HEAP` is read by docker compose only (shell or `./.env`, not `~/.yi/.env`).
 
 ## Layout
 
@@ -194,6 +195,7 @@ vars: `ANTHROPIC_API_KEY`, `YI_DATA_DIR` (benchmark data, outside the repo), `YI
 src/yi_agent/
   llm/        provider protocol, Anthropic provider (streamed), pricing, retry   (vendored)
   trace/      spans, tracer (ContextVar parents), analyze/render/chrome export     (vendored)
+  config.py   settings: ~/.yi/.env -> ./.env -> env vars                           (from kama)
   context.py  ContextMeter: request sizes exact from usage, the tail estimated     (vendored)
   outputs.py  OutputStore and cut(): results over the cap saved whole              (vendored)
 tests/unit/          fast, no network
