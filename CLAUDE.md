@@ -87,9 +87,10 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S0 built; next: S0 check on the VM (Yi), then S1 (data).**
+**Current stage: S0 done (checked on the VM 2026-10-11); next: the small S0 gaps, then S1
+(data).**
 
-Done in S0 (the first two commits on `main`):
+Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
   pytest): 37 unit tests pass.
 - Vendored from kama: LLM provider, retry, pricing, tracer, trace analyzer, context meter,
@@ -97,29 +98,31 @@ Done in S0 (the first two commits on `main`):
 - `docker-compose.yml`: Elasticsearch 9.1.0 single node (+ optional Kibana), security off,
   bound to 127.0.0.1. `make es-up`, `make es-test` (stdlib smoke test: index, bulk,
   search, delete). Verified in the cloud dev container: ES started and es-test passed.
+- **Checked on the VM** (DigitalOcean droplet, Ubuntu 24.04, 4 vCPU, 7.8 GiB RAM, no
+  swap, 150 GB free; Docker 29.9.0, Compose v5.6.0; Yi works as root, repo at
+  `/root/yiagent`): `make verify` 37 passed, `make es-up` + `make es-test` passed with the
+  `ulimits` block as is, Kibana starts, Hugging Face reachable (HTTP 200). RAM is at the
+  8 GB minimum: run Kibana only while using it.
 - Docs: `README.md`, `docs/SETUP.md` (what runs where, VM sizing and steps,
   troubleshooting), `docs/ROADMAP.md` (stages, data facts, open decisions).
 
 Not done yet, in order:
-1. **S0 on the VM (Yi does this).** Steps 1-5 of `docs/SETUP.md`; Yi reports the spec
-   check output and `make es-test`. The compose file's `ulimits` block is untested (the
-   cloud container can't raise rlimits); it's the standard setting for a normal VM.
-2. **Small S0 gaps:** no config loader yet (only `.env.example`; settings should load
+1. **Small S0 gaps:** no config loader yet (only `.env.example`; settings should load
    `~/.yi/.env`, then `./.env`, then env vars, as kama's `config.py` did).
    `llm/pricing.py` lacks current models (Sonnet 5.5, Haiku 5.5): look prices up with
    the claude-api skill, never guess; until then their cost is None ("unknown"), never $0.
-3. **S1 (data):** `yi data fetch` (Hugging Face `snapshot_download` of `re2*`, `re3*` and
+2. **S1 (data):** `yi data fetch` (Hugging Face `snapshot_download` of `re2*`, `re3*` and
    `cases.parquet` into `YI_DATA_DIR`, run on the VM); a case schema; label blinding
    (opaque case ids, labels in a grader-only file); a leakage test; a frozen, stratified,
    seeded dev/test split with its hash pinned in a test; loading a case into
    Elasticsearch indices named by opaque id. Make and record the open S1 decisions in
    ROADMAP first.
-4. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
+3. **S2 (eval harness before the agent):** graders, oracle/null/wrong baselines and a
    selftest inside `make verify`; BARO scored on dev. Find out what RE3's F1-F5 mean
    (from the paper; the data only says "code-level fault F1"). The Hugging Face copy has
    no root-cause indicator column (only 8 RE3 Sock Shop cases ship `root_cause.txt`), so
    S2 writes its own expected-evidence rules per fault type and documents them.
-5. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
+4. S3 agent, S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
 
@@ -167,9 +170,9 @@ Not done yet, in order:
   after `sudo dockerd &`; Elastic's image registry is blocked but Docker Hub is not
   (hence the `elasticsearch:9.1.0` image); its disk looks >90% used to ES, so disable
   the disk threshold there (`docs/SETUP.md`), never on the VM.
-- Git: the first commits are on `main`. No branch rule has been set for this repo yet
-  (kama used one working branch for everything); ask Yi at the start of the first
-  session, then record the answer here.
+- Git: one long-lived working branch for everything (Yi's rule, 2026-10-11, as in kama):
+  all work goes to branch `claude/jolly-euler-45xyyc` only. The first two commits are
+  also on `main`. On the VM: `git fetch origin && git checkout claude/jolly-euler-45xyyc`.
 
 ## Commands
 

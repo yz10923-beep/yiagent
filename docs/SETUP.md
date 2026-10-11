@@ -30,13 +30,28 @@ nproc; free -h; df -h ~; head -2 /etc/os-release; docker --version; docker compo
 
 ## One-time setup
 
-1. **Docker Engine** (skip if `docker compose version` works). Follow the official
-   steps for your distro: https://docs.docker.com/engine/install/ . Then let your user
-   run it without sudo, and log out and back in:
+Tested on a DigitalOcean droplet: Ubuntu 24.04, 4 vCPU, 8 GB, 160 GB disk (2026-10-11).
+
+1. **Base packages and Docker Engine** (skip Docker if `docker compose version` works).
+   Docker Desktop on your laptop is no help here; the VM needs its own Docker Engine
+   (official steps: https://docs.docker.com/engine/install/ ). On Ubuntu or Debian:
 
    ```bash
-   sudo usermod -aG docker "$USER"
+   sudo apt-get update && sudo apt-get install -y git make curl ca-certificates
+   . /etc/os-release   # $ID is ubuntu or debian
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/$ID/gpg -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$ID $VERSION_CODENAME stable" \
+     | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+   sudo apt-get update
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+   sudo systemctl enable --now docker   # the daemon may not be running after install
+   docker run --rm hello-world
    ```
+
+   If you are not root, let your user run Docker without sudo, then log out and back in:
+   `sudo usermod -aG docker "$USER"`.
 
 2. **Kernel setting Elasticsearch needs** (mmap count), now and after reboots:
 
@@ -45,10 +60,13 @@ nproc; free -h; df -h ~; head -2 /etc/os-release; docker --version; docker compo
    sudo sysctl --system
    ```
 
-3. **The repo** (uv and Python 3.12 are already on the VM from kama):
+3. **uv, Python 3.12 and the repo.** Work happens on one branch (see CLAUDE.md):
 
    ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.local/bin/env
+   uv python install 3.12
    git clone https://github.com/yz10923-beep/yiagent.git && cd yiagent
+   git checkout claude/jolly-euler-45xyyc
    uv sync && make verify
    ```
 
@@ -72,7 +90,11 @@ nproc; free -h; df -h ~; head -2 /etc/os-release; docker --version; docker compo
    ```bash
    docker compose --profile kibana up -d          # on the VM
    ssh -L 5601:127.0.0.1:5601 <you>@<vm>          # on the laptop, then open localhost:5601
+   docker compose stop kibana                     # when done: it uses about 1 GB of RAM
    ```
+
+   Run the `ssh -L` on the laptop, not in the VM's shell: inside the VM it tries to SSH
+   to itself and fails with `Permission denied (publickey)`.
 
 Security is off in this compose file (no TLS, no auth) because nothing is exposed:
 both ports bind to 127.0.0.1. **Never open 9200 or 5601 in the firewall** or change
@@ -86,6 +108,8 @@ The data download (`yi data fetch`) arrives with S1; nothing to download yet.
   watermark. Free space. On a throwaway dev box only, you can switch the check off:
   `curl -XPUT 127.0.0.1:9200/_cluster/settings -H 'Content-Type: application/json'
   -d '{"persistent":{"cluster.routing.allocation.disk.threshold_enabled":false}}'`
+- **`Cannot connect to the Docker daemon`:** the daemon isn't running:
+  `sudo systemctl enable --now docker`.
 - **`error setting rlimit type 7: operation not permitted`:** the VM is a restricted
   container (some VPS types) that can't raise the open-file limit. Delete the
   `ulimits:` block from `docker-compose.yml`.

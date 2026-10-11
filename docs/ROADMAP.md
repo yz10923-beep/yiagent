@@ -13,6 +13,13 @@ Evals come before the agent: S2 grades a null and an oracle answer before S3 exi
 | **S4** | Improvements, each one an A/B: log template grouping, grounding feedback, model and effort | Each change has a measured effect (or a measured non-effect) on dev |
 | **S5** | Generalize and deploy: OpenRCA Bank adapter, alert-webhook service, results dashboard | One test-split run, reported once; the same agent runs on OpenRCA Bank |
 
+## S0 result (2026-10-11)
+
+Done criteria met on the VM (DigitalOcean, Ubuntu 24.04, 4 vCPU, 8 GB, 150 GB free):
+`make verify` green (37 unit tests), `make es-up && make es-test` green, Kibana up,
+Hugging Face reachable. Left over, done before S1: the config loader and current-model
+prices (CLAUDE.md, Status).
+
 ## Facts about the data (checked 2026-10-11)
 
 - RCAEval on Hugging Face (`phamquiluan/RCAEval`, MIT): one directory per case with
