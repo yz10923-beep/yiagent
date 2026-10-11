@@ -6,6 +6,7 @@ import pyarrow as pa
 import pytest
 
 from tests.rcaeval_fixture import ONSET_S, make_case
+from yi_agent.data.check import inspect_case
 from yi_agent.data.telemetry import (
     FileStats,
     TelemetryError,
@@ -93,6 +94,38 @@ def test_metrics_go_long_skipping_unobserved_and_nan_cells(tmp_path: Path) -> No
     assert stats.skipped_nonfinite == 1 and stats.rows == 61
     assert set(docs[0]) == {"@timestamp", "metric", "value"}
     assert {x["metric"] for x in docs} == {"frontend_cpu", "backend_latency-50", "backend_mem"}
+
+
+def test_a_time_of_day_string_loses_to_a_numeric_time_column(tmp_path: Path) -> None:
+    # The VM's first real failure: Train Ticket logs, `timestamp` = '12:02'.
+    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", log_time="tt")
+    stats = FileStats()
+    docs = list(iter_docs("logs", d / "logs.parquet", stats))
+    assert (stats.time_column, stats.time_unit) == ("time", "s")
+    assert len(docs) == 5 and docs[0]["@timestamp"] == ONSET_S * 1000
+    assert docs[0]["timestamp"] == "12:02"  # the source column is kept as it is
+
+
+def test_no_usable_time_column_is_a_clear_error(tmp_path: Path) -> None:
+    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", log_time="time-of-day-only")
+    with pytest.raises(TelemetryError, match="no usable time column.*12:02"):
+        list(iter_docs("logs", d / "logs.parquet", FileStats()))
+
+
+def test_unparseable_strings_in_a_time_column_are_counted_not_fatal() -> None:
+    norm = TimeNormalizer()
+    assert norm(pa.array(["2024-01-22T14:52:05Z", "garbage"])) == [T * 1000, None]
+    assert norm.unparsed == 1
+    with pytest.raises(TelemetryError):
+        TimeNormalizer()(pa.array(["12:02", "12:03"]))  # nothing parses: not a time column
+
+
+def test_inspect_never_raises_and_shows_the_raw_values(tmp_path: Path) -> None:
+    d = make_case(tmp_path, "re2tt_ts-travel-service_disk_1", log_time="time-of-day-only")
+    out = inspect_case(d)
+    assert "time candidate timestamp (string): ['12:02'" in out
+    assert "time column: ERROR" in out  # logs
+    assert "time column: time, unit ns" in out  # traces still fine
 
 
 def test_window_and_missing_sources(tmp_path: Path) -> None:

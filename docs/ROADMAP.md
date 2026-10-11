@@ -95,6 +95,12 @@ line item.
   story; per-case metric volume (at most about 540K cells for Train Ticket) is small.
   `metric` keeps the column name whole: splitting `{service}_{metric}` safely needs the
   real column names, which S1 inspects on the VM first.
+- **The time column is chosen from the values, not the name** (first VM run,
+  2026-10-11): in `re2tt_ts-travel-service_disk_1` the logs' `timestamp` is a string
+  holding a time of day (`'12:02'`), not the int64 epoch the README promises. Per source,
+  candidates are tried in order (logs: `timestamp`, `time`, `@timestamp`, `ts`; traces:
+  `time`, `startTime`, `timestamp`) and a typed column that reads as an epoch wins over a
+  string; no usable column is an error naming every candidate and its values.
 - **Timestamps are normalized to epoch milliseconds** in `@timestamp`, the unit detected
   per column from the values (s, ms, us or ns by magnitude; ISO strings parsed), and the
   detected unit is reported, because the README does not say what unit logs and traces

@@ -106,7 +106,7 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
             continue
         total_docs += report.docs
         total_s += report.seconds
-        units = {k: s.time_unit for k, s in report.stats.items()}
+        units = {k: f"{s.time_column}:{s.time_unit}" for k, s in report.stats.items()}
         skipped = sum(s.skipped_nonfinite + s.skipped_no_time for s in report.stats.values())
         print(
             f"{i}: {report.docs:>8} docs in {report.seconds:5.1f}s "

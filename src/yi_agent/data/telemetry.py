@@ -23,7 +23,14 @@ type Kind = Literal["logs", "traces", "metrics"]
 type Doc = dict[str, Any]
 
 KINDS: tuple[Kind, ...] = ("logs", "traces", "metrics")
-TIME_COLUMN: dict[Kind, str] = {"logs": "timestamp", "traces": "time", "metrics": "time"}
+# Where a source's time may be, in order of preference. The README says logs carry an
+# int64 `timestamp`, but Train Ticket's logs have a string `timestamp` holding a time of
+# day ('12:02'), so the column is chosen from the values, not from the name.
+TIME_CANDIDATES: dict[Kind, tuple[str, ...]] = {
+    "logs": ("timestamp", "time", "@timestamp", "ts"),
+    "traces": ("time", "startTime", "timestamp"),
+    "metrics": ("time",),
+}
 BATCH_ROWS = 10_000
 
 # Epoch values of 2001-2286 in each unit fall in disjoint ranges, so the magnitude of one
@@ -73,6 +80,7 @@ class TimeNormalizer:
     def __init__(self) -> None:
         self.unit: str | None = None
         self._to_ms = 1.0
+        self.unparsed = 0  # string values that are not a time; they become None
 
     def __call__(self, col: pa.ChunkedArray | pa.Array) -> list[int | None]:
         t = col.type
@@ -80,9 +88,20 @@ class TimeNormalizer:
             self.unit = self.unit or f"timestamp[{t.unit}]"
             ms = pc.cast(pc.cast(col, pa.timestamp("ms", tz=t.tz)), pa.int64())
             return [None if v is None else int(v) for v in ms.to_pylist()]
-        if pa.types.is_string(t) or pa.types.is_large_string(t):
+        if _is_string(t):
+            out: list[int | None] = []
+            error: TelemetryError | None = None
+            for s in col.to_pylist():
+                try:
+                    out.append(None if s is None else round(_parse_time_string(s)))
+                except TelemetryError as e:
+                    out.append(None)
+                    self.unparsed += 1
+                    error = error or e
+            if error is not None and all(v is None for v in out):
+                raise error  # not a time column at all
             self.unit = self.unit or "string"
-            return [None if s is None else round(_parse_time_string(s)) for s in col.to_pylist()]
+            return out
         if not (pa.types.is_integer(t) or pa.types.is_floating(t)):
             raise TelemetryError(f"time column has type {t}")
         values = [v if v is not None and math.isfinite(v) else None for v in col.to_pylist()]
@@ -94,12 +113,44 @@ class TimeNormalizer:
         return [None if v is None else round(v * self._to_ms) for v in values]
 
 
+def _is_string(t: pa.DataType) -> bool:
+    return bool(pa.types.is_string(t) or pa.types.is_large_string(t))
+
+
+def pick_time_column(kind: Kind, pf: pq.ParquetFile) -> str:
+    """The first candidate whose values are epoch times. A typed (numeric or timestamp)
+    column wins over a string one."""
+    names: list[str] = list(pf.schema_arrow.names)
+    present = [c for c in TIME_CANDIDATES[kind] if c in names]
+    if not present:
+        raise TelemetryError(f"{kind}: no time column among {names[:12]}")
+    sample = next(pf.iter_batches(batch_size=50, columns=present), None)
+    if sample is None or sample.num_rows == 0:
+        return present[0]  # an empty file: nothing to place in time
+    tried: list[str] = []
+    for want_typed in (True, False):
+        for c in present:
+            col = sample.column(c)
+            if _is_string(col.type) == want_typed:
+                continue
+            try:
+                ms = TimeNormalizer()(col)
+            except TelemetryError as e:
+                tried.append(f"{c} ({col.type}): {e}")
+                continue
+            if any(v is not None for v in ms):
+                return c
+            tried.append(f"{c} ({col.type}): no values")
+    raise TelemetryError(f"{kind}: no usable time column: {'; '.join(tried)}")
+
+
 @dataclass
 class FileStats:
     rows: int = 0
     docs: int = 0
     skipped_nonfinite: int = 0  # NaN/inf metric cells: JSON can't carry them
     skipped_no_time: int = 0
+    time_column: str | None = None
     time_unit: str | None = None
     columns: list[str] = field(default_factory=list)
 
@@ -114,9 +165,7 @@ def iter_docs(kind: Kind, path: Path, stats: FileStats) -> Iterator[Doc]:
     pf = pq.ParquetFile(path)
     names: list[str] = list(pf.schema_arrow.names)
     stats.columns = names
-    time_col = TIME_COLUMN[kind]
-    if time_col not in names:
-        raise TelemetryError(f"{kind}: no {time_col!r} column (columns: {names[:10]})")
+    time_col = stats.time_column = pick_time_column(kind, pf)
     norm = TimeNormalizer()
     for batch in pf.iter_batches(batch_size=BATCH_ROWS):
         stats.rows += batch.num_rows
@@ -179,7 +228,9 @@ def read_window(case_dir: Path) -> CaseWindow:
         onset_s = int((case_dir / "inject_time.txt").read_text().strip())
     except (OSError, ValueError) as e:
         raise TelemetryError(f"bad inject_time.txt: {e}") from e
-    times = pq.read_table(paths["metrics"], columns=["time"]).column("time")
+    pf = pq.ParquetFile(paths["metrics"])
+    col = pick_time_column("metrics", pf)
+    times = pq.read_table(paths["metrics"], columns=[col]).column(col)
     ms = [t for t in TimeNormalizer()(times) if t is not None]
     if not ms:
         raise TelemetryError("metrics.parquet has no timestamps")

@@ -22,6 +22,7 @@ def make_case(
     logs: bool = True,
     traces: bool = True,
     trace_time: str = "ns",
+    log_time: str = "ns",
 ) -> Path:
     d = data_dir / name
     d.mkdir(parents=True)
@@ -40,16 +41,18 @@ def make_case(
         d / "metrics.parquet",
     )
     if logs:
-        pq.write_table(
-            pa.table(
-                {
-                    "timestamp": pa.array([(ONSET_S + i) * 1_000_000_000 for i in range(5)]),
-                    "container_name": ["frontend", "backend", "backend", "frontend", "backend"],
-                    "message": [f"GET /cart 200 {i}ms" for i in range(4)] + ["ERROR timeout"],
-                }
-            ),
-            d / "logs.parquet",
-        )
+        cols: dict[str, object] = {
+            "timestamp": pa.array([(ONSET_S + i) * 1_000_000_000 for i in range(5)]),
+            "container_name": ["frontend", "backend", "backend", "frontend", "backend"],
+            "message": [f"GET /cart 200 {i}ms" for i in range(4)] + ["ERROR timeout"],
+        }
+        if log_time in ("tt", "time-of-day-only"):
+            # Seen on the VM in Train Ticket's logs: `timestamp` = '12:02', a time of day.
+            # Whether a numeric time column sits beside it there is not known yet ("tt").
+            cols["timestamp"] = ["12:02", "12:02", "12:03", "12:03", "12:03"]
+        if log_time == "tt":
+            cols["time"] = pa.array([ONSET_S + i for i in range(5)], pa.int64())
+        pq.write_table(pa.table(cols), d / "logs.parquet")
     if traces:
         if trace_time == "iso":
             tt: pa.Array = pa.array([f"2024-01-22T14:52:{5 + i:02d}" for i in range(3)])

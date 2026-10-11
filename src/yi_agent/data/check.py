@@ -13,7 +13,13 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from yi_agent.data.rcaeval import CaseLabel
-from yi_agent.data.telemetry import TIME_COLUMN, TimeNormalizer, read_window, source_paths
+from yi_agent.data.telemetry import (
+    TIME_CANDIDATES,
+    TimeNormalizer,
+    pick_time_column,
+    read_window,
+    source_paths,
+)
 
 
 def check_download(data_dir: Path, labels: list[CaseLabel]) -> list[str]:
@@ -65,12 +71,17 @@ def _short(v: Any, n: int = 120) -> str:
 
 
 def inspect_case(case_dir: Path) -> str:
-    """Schema, row counts, time units and two sample rows per file, for a human to read."""
-    w = read_window(case_dir)
-    out = [
-        f"window {(w.end_ms - w.start_ms) / 60000:.1f} min, onset at "
-        f"+{(w.onset_ms - w.start_ms) / 1000:.0f}s, sources {w.sources}"
-    ]
+    """Schema, raw sample rows, and the time column chosen per file, for a human to read.
+    Never raises: on real data the point is to see what breaks, so errors are printed."""
+    out: list[str] = []
+    try:
+        w = read_window(case_dir)
+        out.append(
+            f"window {(w.end_ms - w.start_ms) / 60000:.1f} min, onset at "
+            f"+{(w.onset_ms - w.start_ms) / 1000:.0f}s, sources {w.sources}"
+        )
+    except Exception as e:
+        out.append(f"window: ERROR {e}")
     for kind, path in source_paths(case_dir).items():
         pf = pq.ParquetFile(path)
         schema = pf.schema_arrow
@@ -80,13 +91,24 @@ def inspect_case(case_dir: Path) -> str:
         if kind == "metrics":
             names = [f.name for f in schema if f.name != "time"]
             out.append(f"  metric names (sample): {names[:8]} ... {names[-4:]}")
-        first = next(pf.iter_batches(batch_size=2))
-        norm = TimeNormalizer()
-        ms = norm(first.column(TIME_COLUMN[kind]))
-        out.append(f"  time unit: {norm.unit}; first rows at ms {ms}")
-        for row in first.to_pylist():
+        first = next(pf.iter_batches(batch_size=3), None)
+        if first is None:
+            out.append("  (no rows)")
+            continue
+        for row in first.to_pylist()[:2]:
             items = list(row.items())[:12]
             out.append("  row: {" + ", ".join(f"{k}: {_short(v, 80)}" for k, v in items) + "}")
+        for c in TIME_CANDIDATES[kind]:
+            if c in schema.names:
+                raw = first.column(c).to_pylist()
+                out.append(f"  time candidate {c} ({schema.field(c).type}): {_short(raw, 100)}")
+        try:
+            col = pick_time_column(kind, pf)
+            norm = TimeNormalizer()
+            ms = norm(first.column(col))
+            out.append(f"  time column: {col}, unit {norm.unit}, first rows at ms {ms}")
+        except Exception as e:
+            out.append(f"  time column: ERROR {e}")
     return "\n".join(out)
 
 
