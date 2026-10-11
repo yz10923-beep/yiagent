@@ -8,6 +8,6 @@ dist/
 .env
 *.egg-info/
 # Downloaded benchmark data lives outside the repo (YI_DATA_DIR); never commit it.
-data/
+/data/
 evals/results/*/*/traces/
 evals/results/*/*/events/
