@@ -1,0 +1,283 @@
+"""Provider mapping tests: SDK objects in, our types out; no network."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import anthropic
+import httpx2
+import pytest
+from anthropic.types.beta import BetaMessage
+
+from yi_agent.llm.anthropic_provider import AnthropicProvider, to_llm_response
+from yi_agent.llm.types import LLMError
+
+
+def beta_message(content: list[dict[str, Any]], stop: str = "tool_use") -> BetaMessage:
+    return BetaMessage.model_validate(
+        {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-opus-5",
+            "content": content,
+            "stop_reason": stop,
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": None,
+            },
+        }
+    )
+
+
+def sse(content: list[dict[str, Any]], stop: str) -> httpx2.Response:
+    """A streamed Messages API response (Server-Sent Events) for the given final blocks."""
+    events: list[dict[str, Any]] = [
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5",
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 1,
+                    "cache_read_input_tokens": 80,
+                    "cache_creation_input_tokens": 0,
+                },
+            },
+        }
+    ]
+    for i, block in enumerate(content):
+        kind = block["type"]
+        if kind == "text":
+            events.append(
+                {
+                    "type": "content_block_start",
+                    "index": i,
+                    "content_block": {"type": "text", "text": ""},
+                }
+            )
+            for word in block["text"].split(" "):
+                events.append(
+                    {
+                        "type": "content_block_delta",
+                        "index": i,
+                        "delta": {"type": "text_delta", "text": word + " "},
+                    }
+                )
+        elif kind == "thinking":
+            events.append(
+                {
+                    "type": "content_block_start",
+                    "index": i,
+                    "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+                }
+            )
+            events.append(
+                {
+                    "type": "content_block_delta",
+                    "index": i,
+                    "delta": {"type": "signature_delta", "signature": block["signature"]},
+                }
+            )
+        elif kind == "tool_use":
+            start = {"type": "tool_use", "id": block["id"], "name": block["name"], "input": {}}
+            events.append({"type": "content_block_start", "index": i, "content_block": start})
+            events.append(
+                {
+                    "type": "content_block_delta",
+                    "index": i,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": json.dumps(block["input"]),
+                    },
+                }
+            )
+        events.append({"type": "content_block_stop", "index": i})
+    events.append(
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop, "stop_sequence": None},
+            "usage": {"output_tokens": 20},
+        }
+    )
+    events.append({"type": "message_stop"})
+    body = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
+    return httpx2.Response(
+        200, headers={"content-type": "text/event-stream"}, content=body.encode()
+    )
+
+
+def test_response_mapping_parses_calls_and_keeps_blocks_verbatim() -> None:
+    blocks = [
+        {"type": "thinking", "thinking": "", "signature": "abc=="},
+        {"type": "text", "text": "Let me look."},
+        {"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {"path": "a.py"}},
+    ]
+    r = to_llm_response(beta_message(blocks))
+    assert r.stop_reason == "tool_use"
+    assert r.text == "Let me look."
+    assert [(c.id, c.name, c.input) for c in r.tool_calls] == [
+        ("tu_1", "read_file", {"path": "a.py"})
+    ]
+    assert r.content[0] == blocks[0]  # thinking signature survives the round trip
+    assert r.content[2] == blocks[2]
+    assert (r.usage.cache_read_input_tokens, r.usage.cache_creation_input_tokens) == (80, 0)
+
+
+def test_unknown_stop_reason_maps_to_other() -> None:
+    msg = beta_message([{"type": "text", "text": "x"}], stop="end_turn")
+    object.__setattr__(msg, "stop_reason", "something_new")
+    assert to_llm_response(msg).stop_reason == "other"
+
+
+def test_request_shape() -> None:
+    p = AnthropicProvider(model="claude-opus-5", max_tokens=16000, effort="high", api_key="k")
+    req = p.build_request(system="sys", messages=[{"role": "user", "content": "hi"}], tools=[])
+    assert req["cache_control"] == {"type": "ephemeral"}
+    assert req["output_config"] == {"effort": "high"}
+    assert req["fallbacks"] == "default" and req["betas"] == ["server-side-fallback-2026-07-01"]
+
+
+def test_fallback_not_sent_for_unsupported_models_or_when_disabled() -> None:
+    for p in (
+        AnthropicProvider(model="claude-haiku-4-5", max_tokens=1, api_key="k"),
+        AnthropicProvider(model="claude-opus-5", max_tokens=1, refusal_fallback=False, api_key="k"),
+    ):
+        req = p.build_request(system="s", messages=[], tools=[])
+        assert "fallbacks" not in req and "betas" not in req
+        assert "output_config" not in req
+
+
+@pytest.mark.parametrize(("status", "retryable"), [(400, False), (429, True), (529, True)])
+async def test_api_errors_become_llm_errors(status: int, retryable: bool) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status, json={"type": "error", "error": {"message": "nope"}})
+
+    client = anthropic.AsyncAnthropic(
+        api_key="k",
+        max_retries=0,
+        http_client=anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)),
+    )
+    p = AnthropicProvider(model="claude-opus-5", max_tokens=10, client=client)
+    with pytest.raises(LLMError) as exc:
+        await p.complete(system="s", messages=[{"role": "user", "content": "hi"}], tools=[])
+    assert exc.value.retryable is retryable
+    assert str(status) in str(exc.value)
+
+
+async def test_missing_credentials_become_non_retryable_llm_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", "/nonexistent")  # no `ant auth` profile on disk
+    p = AnthropicProvider(model="claude-opus-5", max_tokens=10)
+    with pytest.raises(LLMError) as exc:
+        await p.complete(system="s", messages=[{"role": "user", "content": "hi"}], tools=[])
+    assert not exc.value.retryable and "ANTHROPIC_API_KEY" in str(exc.value)
+
+
+def test_effort_is_not_sent_to_models_that_reject_it() -> None:
+    haiku = AnthropicProvider(model="claude-haiku-4-5", max_tokens=1, effort="high", api_key="k")
+    assert haiku.effort is None
+    assert "output_config" not in haiku.build_request(system="s", messages=[], tools=[])
+    opus = AnthropicProvider(model="claude-opus-5", max_tokens=1, effort="high", api_key="k")
+    assert opus.effort == "high"
+
+
+# ---------------------------------------------------------------- S5: error kinds, retry-after
+
+
+def _provider(handler: Any) -> AnthropicProvider:
+    client = anthropic.AsyncAnthropic(
+        api_key="k",
+        max_retries=0,
+        http_client=anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)),
+    )
+    return AnthropicProvider(model="claude-opus-5", max_tokens=10, client=client)
+
+
+async def _fail(handler: Any) -> LLMError:
+    with pytest.raises(LLMError) as exc:
+        await _provider(handler).complete(
+            system="s", messages=[{"role": "user", "content": "hi"}], tools=[]
+        )
+    return exc.value
+
+
+@pytest.mark.parametrize(
+    ("status", "error_type", "kind", "retryable"),
+    [
+        (429, "rate_limit_error", "rate_limit", True),
+        (529, "overloaded_error", "overloaded", True),
+        (500, "api_error", "server", True),
+        (400, "invalid_request_error", "invalid_request", False),
+        (401, "authentication_error", "auth", False),
+        (404, "not_found_error", "not_found", False),
+        (413, "request_too_large", "too_large", False),
+    ],
+)
+async def test_errors_are_classified_by_api_type(
+    status: int, error_type: str, kind: str, retryable: bool
+) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            status,
+            headers={"retry-after": "7"},
+            json={"type": "error", "error": {"type": error_type, "message": "x"}},
+        )
+
+    e = await _fail(handler)
+    assert (e.kind, e.retryable, e.status, e.retry_after_s) == (kind, retryable, status, 7.0)
+
+
+async def test_prompt_too_long_is_a_context_overflow() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        msg = "prompt is too long: 1204331 tokens > 1000000 maximum"
+        return httpx2.Response(
+            400, json={"type": "error", "error": {"type": "invalid_request_error", "message": msg}}
+        )
+
+    e = await _fail(handler)
+    assert (e.kind, e.retryable, e.status) == ("context_overflow", False, 400)
+
+
+async def test_overload_mid_stream_is_retryable() -> None:
+    """The API can fail after streaming has started: an `error` event on a 200 response."""
+    head = sse([{"type": "text", "text": "partial"}], "end_turn").content.decode()
+    cut = head.split("event: content_block_stop")[0]
+    error = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+    body = cut + f"event: error\ndata: {json.dumps(error)}\n\n"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, content=body.encode()
+        )
+
+    e = await _fail(handler)
+    assert (e.kind, e.retryable, e.status) == ("overloaded", True, 200)
+
+
+def test_retry_after_headers() -> None:
+    from yi_agent.llm.anthropic_provider import retry_after
+
+    assert retry_after({"retry-after-ms": "1500", "retry-after": "9"}) == 1.5
+    assert retry_after({"retry-after": "3"}) == 3.0
+    assert retry_after({"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}) is None
+    assert retry_after({}) is None
+
+
+def test_the_sdk_does_not_retry_behind_our_back() -> None:
+    from yi_agent.llm.anthropic_provider import make_client
+
+    assert make_client("k").max_retries == 0

@@ -1,0 +1,302 @@
+"""Tracing: span structure and the analysis numbers (vendored from kama; the loop-level
+tests stay in kama, since this repo's loop is its own)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from yi_agent.llm.pricing import cost_usd
+from yi_agent.trace.analyze import load_spans, render, summarize, to_chrome
+from yi_agent.trace.span import Span
+from yi_agent.trace.tracer import JsonlSpanWriter, Tracer
+
+TRACE_FILE = "trace.jsonl"
+
+
+class ListSink:
+    def __init__(self) -> None:
+        self.spans: list[Span] = []
+
+    def write(self, span: Span) -> None:
+        self.spans.append(span)
+
+
+def by_name(spans: list[Span]) -> dict[str, Span]:
+    return {s.name: s for s in spans}
+
+
+# ---- the tracer
+
+
+async def test_parents_follow_the_async_structure() -> None:
+    sink = ListSink()
+    tracer = Tracer("t1", sink)
+
+    async def worker(n: int) -> None:
+        with tracer.span(f"task{n}", "tool"):
+            await asyncio.sleep(0.01)
+
+    with tracer.span("root", "agent"):
+        with tracer.span("child", "llm"):
+            await asyncio.sleep(0)
+        await asyncio.gather(worker(1), worker(2))  # concurrent tasks
+
+    s = by_name(sink.spans)
+    root = s["root"].span_id
+    assert s["child"].parent_id == root
+    # Concurrent siblings: each task has its own context, so neither nests in the other.
+    assert s["task1"].parent_id == root and s["task2"].parent_id == root
+    assert s["root"].parent_id is None
+    assert [x.name for x in sink.spans][-1] == "root"  # parents end (are written) last
+
+
+async def test_errors_and_cancellation_are_recorded_and_propagate() -> None:
+    sink = ListSink()
+    tracer = Tracer("t1", sink)
+    with pytest.raises(ValueError), tracer.span("boom", "tool"):
+        raise ValueError("bad input")
+
+    async def hang() -> None:
+        with tracer.span("slow", "llm"):
+            await asyncio.sleep(3600)
+
+    task = asyncio.create_task(hang())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    s = by_name(sink.spans)
+    assert (s["boom"].status, s["boom"].error) == ("error", "ValueError: bad input")
+    assert s["slow"].status == "cancelled"
+
+
+async def test_span_from_another_trace_becomes_a_link_not_a_parent() -> None:
+    daemon_sink, run_sink = ListSink(), ListSink()
+    with Tracer("daemon", daemon_sink).span("rpc run.start", "ipc") as rpc:
+        with Tracer("run-1", run_sink).span("run", "agent"):
+            pass
+    [run] = run_sink.spans
+    assert run.parent_id is None
+    assert run.attrs["linked_span"] == f"daemon/{rpc.span_id}"
+
+
+def test_writer_roundtrip_sorted_by_start(tmp_path: Path) -> None:
+    tracer = Tracer("t1", JsonlSpanWriter(tmp_path / TRACE_FILE))
+    tracer.record("later", "ipc", start_ns=2_000, duration_ns=5, attrs={"method": "m"})
+    tracer.record("earlier", "ipc", start_ns=1_000, duration_ns=5)
+    spans = load_spans(tmp_path / TRACE_FILE)
+    assert [s.name for s in spans] == ["earlier", "later"]
+    assert spans[1].attrs == {"method": "m"}
+
+
+def test_pricing_uses_the_longest_matching_model_id() -> None:
+    usage = {"input_tokens": 1_000_000}
+    assert cost_usd("claude-opus-5-5", usage) == pytest.approx(4.0)  # not Opus 5's $5
+    assert cost_usd("claude-opus-5", usage) == pytest.approx(5.0)
+    assert cost_usd("fake-model", usage) is None  # unknown is None, never a silent $0
+    cached = {"cache_read_input_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000}
+    assert cost_usd("claude-opus-5", cached) == pytest.approx(5.0 * 0.1 + 5.0 * 1.25)
+
+
+# ---- the analysis, on hand-made spans with exact numbers
+
+MS = 1_000_000
+
+
+def mk(name: str, kind: Any, start_ms: int, dur_ms: int, parent: str | None, **attrs: Any) -> Span:
+    return Span(
+        trace_id="run-x",
+        span_id=name.replace(" ", "_"),
+        parent_id=parent,
+        name=name,
+        kind=kind,
+        start_ns=start_ms * MS,
+        duration_ns=dur_ms * MS,
+        attrs=attrs,
+    )
+
+
+SYNTHETIC = [
+    mk("run", "agent", 0, 10_000, None, status="completed", steps=2, model="claude-opus-5"),
+    mk("step 1", "agent", 0, 9_000, "run", step=1),
+    mk(
+        "llm.call",
+        "llm",
+        0,
+        6_000,
+        "step_1",
+        step=1,
+        ttft_ms=1_000,
+        output_tokens=500,
+        input_tokens=100,
+        cache_read_input_tokens=800,
+        cache_creation_input_tokens=100,
+        cost_usd=0.0135,
+    ),
+    mk("tool bash", "tool", 6_000, 3_000, "step_1"),
+    mk("tool.approval", "tool", 6_000, 1_000, "tool_bash"),
+    mk("tool.exec", "tool", 7_000, 2_000, "tool_bash"),
+    mk(
+        "bus.subscribe",
+        "bus",
+        0,
+        10_000,
+        None,
+        client="cli",
+        ended="finished",
+        replayed=0,
+        live_events=9,
+        deltas=4,
+        lag_mean_ms=0.2,
+        lag_max_ms=1.5,
+    ),
+    mk("rpc run.start", "ipc", 0, 3, None, method="run.start"),
+]
+
+
+def test_summary_says_where_time_and_tokens_went() -> None:
+    s = summarize(SYNTHETIC)
+    assert (s.wall_ms, s.llm_ms, s.tool_ms, s.approval_ms) == (10_000, 6_000, 2_000, 1_000)
+    assert s.other_ms == 1_000  # loop overhead = wall minus everything measured
+    assert s.cost_usd == pytest.approx(0.0135)
+    assert s.cache_hit_ratio == pytest.approx(0.8)  # 800 of 1000 prompt tokens from cache
+    [call] = s.calls
+    assert call.tokens_per_s == pytest.approx(100.0)  # 500 tokens over 5s of generation
+    assert s.slowest[0].name == "llm.call"
+    assert s.ipc["run.start"]["count"] == 1
+
+
+def test_render_and_chrome_export() -> None:
+    text = render(SYNTHETIC, width=20)
+    assert "model        6.0s   60%" in text
+    assert "approval     1.0s   10%" in text
+    assert "cache hit 80%" in text
+    assert "500 out tok at 100 tok/s" in text
+    chrome = to_chrome(SYNTHETIC)
+    xs = [e for e in chrome["traceEvents"] if e["ph"] == "X"]
+    assert len(xs) == len(SYNTHETIC)
+    llm = next(e for e in xs if e["name"] == "llm.call")
+    assert (llm["ts"], llm["dur"]) == (0, 6_000_000)  # microseconds
+    json.dumps(chrome)  # serializable
+
+
+# ---- S6: the context section
+
+
+CONTEXT_RUN = [
+    mk(
+        "run",
+        "agent",
+        0,
+        10_000,
+        None,
+        status="completed",
+        steps=3,
+        model="claude-opus-5",
+        context_budget=10_000,
+        context_cap=30_000,
+        context_compaction=True,
+    ),
+    mk(
+        "llm.call",
+        "llm",
+        0,
+        1_000,
+        "run",
+        step=1,
+        context_tokens=4_000,
+        context_estimate=4_400,
+        input_tokens=10,
+        cache_read_input_tokens=3_990,
+        output_tokens=50,
+        cost_usd=0.01,
+    ),
+    mk("tool bash", "tool", 1_000, 500, "run", tool="bash", cut_chars=70_000, output_id="t1"),
+    mk(
+        "llm call 2",
+        "llm",
+        2_000,
+        1_000,
+        "run",
+        step=2,
+        context_tokens=11_000,
+        context_estimate=12_100,
+        input_tokens=10,
+        cache_read_input_tokens=10_990,
+        output_tokens=50,
+        cost_usd=0.02,
+    ),
+    mk(
+        "context.compact",
+        "llm",
+        3_000,
+        2_000,
+        "run",
+        step=3,
+        tokens_before=11_200,
+        measured="count",
+        input_tokens=11_200,
+        output_tokens=300,
+        cost_usd=0.05,
+    ),
+    mk(
+        "llm call 3",
+        "llm",
+        5_000,
+        1_000,
+        "run",
+        step=3,
+        context_tokens=2_000,
+        context_estimate=2_200,
+        input_tokens=2_000,
+        output_tokens=40,
+        cost_usd=0.01,
+    ),
+]
+
+
+def test_context_section_draws_the_curve_with_compactions_in_place() -> None:
+    s = summarize(CONTEXT_RUN)
+    assert s.context_budget == 10_000 and s.context_peak == 11_000
+    assert [p.tokens for p in s.context] == [4_000, 11_000, 2_000]
+    assert len(s.calls) == 3  # the compaction is not a model call of a step
+    assert s.tokens["input_tokens"] == 10 + 10 + 11_200 + 2_000  # but it is billed
+    assert s.cost_usd == pytest.approx(0.09) and s.compact_ms == 2_000
+    assert s.estimate_error == pytest.approx(0.10)  # it overestimated by 10%, the safe side
+    text = render(CONTEXT_RUN, width=20)
+    assert "context  budget 10.0K · peak 11.0K (110% of budget) · 1 compaction(s)" in text
+    assert "1 result(s) cut (70,000 chars kept outside) · estimate vs actual +10% (median)" in text
+    lines = text.splitlines()
+    i = lines.index(next(x for x in lines if "⇣ compacted 11.2K" in x))
+    assert "$0.0500" in lines[i] and lines[i + 1].startswith("  step   3 |")
+    step2 = next(x for x in lines if x.startswith("  step   2 |"))
+    assert "┃" in step2 and step2.endswith("11.0K")  # over budget: the bar crosses the mark
+    assert "compaction" in next(x for x in lines if x.strip().startswith("compaction"))
+
+
+def test_with_context_off_the_curve_is_drawn_without_a_budget() -> None:
+    off = [
+        CONTEXT_RUN[0].model_copy(update={"attrs": {"status": "completed", "steps": 1}}),
+        CONTEXT_RUN[1],
+    ]
+    text = render(off, width=20)
+    assert "context  governance off · peak 4.0K" in text and "┊" not in text
+
+
+def test_a_trace_that_cannot_be_written_never_ends_the_run(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Found in s6-cal: a run dir deleted mid-run raised out of a span's __exit__ and
+    crashed the suite. Spans are dropped with one warning; the code they wrap goes on."""
+    run_dir = tmp_path / "run"
+    tracer = Tracer("t1", JsonlSpanWriter(run_dir / TRACE_FILE))
+    run_dir.rmdir()
+    for _ in range(3):
+        with tracer.span("llm.call", "llm"):
+            pass
+    assert sum("cannot write trace" in r.message for r in caplog.records) == 1

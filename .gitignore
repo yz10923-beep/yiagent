@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+.env
+*.egg-info/
+# Downloaded benchmark data lives outside the repo (YI_DATA_DIR); never commit it.
+data/
+evals/results/*/*/traces/
+evals/results/*/*/events/

@@ -1,0 +1,33 @@
+# Local Elasticsearch (and optional Kibana) for integration tests and eval runs.
+# Security is off, so both ports bind to 127.0.0.1 only: reach Kibana from your laptop
+# with an SSH tunnel, never by opening a port (docs/SETUP.md).
+services:
+  elasticsearch:
+    image: elasticsearch:9.1.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms${YI_ES_HEAP:-2g} -Xmx${YI_ES_HEAP:-2g}
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      retries: 30
+
+  kibana:
+    profiles: ["kibana"]  # only with `docker compose --profile kibana up -d`
+    image: kibana:9.1.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+
+volumes:
+  esdata:
