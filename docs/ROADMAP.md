@@ -209,6 +209,46 @@ of 0.50). Open until the VM run: `reproduce-baro` against the published numbers,
 real metric families and indicator coverage, and the dev scores of BARO, random and the
 leak detectors.
 
+### First VM run (2026-10-12)
+
+Yi approved harness `6ad6f3dc49fc...` (= commit d361773) by scoring the oracle with
+`--approve-harness`. Dev, 77 cases:
+
+| baseline | AC@1 (95% CI) | AC@3 | Avg@5 | F1 re2 | F1 re3 | evidence on target | expected evidence |
+|---|---|---|---|---|---|---|---|
+| oracle | 1.00 (0.95-1.00) | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| random | 0.08 (0.04-0.16) | 0.21 | 0.22 | 0.07 | 0.20 | - | 0.00 |
+| BARO | 0.17 (0.10-0.27) | 0.79 | 0.66 | 0.18 | 0.00 | 0.17 | 0.12 |
+| shape-time (leak detector) | **0.90** (0.81-0.95) | 0.94 | 0.94 | - | - | - | - |
+| shape-columns (leak detector) | **0.68** (0.56-0.77) | 0.90 | 0.87 | - | - | - | - |
+
+Chance Avg@5 over dev is 0.18 (Train Ticket 0.04: about 60 candidate services). Metric
+families on the VM: cpu, mem, diskio, socket, workload, error, latency-50, latency-90
+(error is missing in a few SS and TT cases). The paper's indicator exists and holds in
+74 of 77 dev cases (missing: 2 re2-ob delay, 1 re2-ob loss: the root cause's latency did
+not move by a robust z of 3).
+
+**Finding 1: BARO does not reproduce yet.** RE2-TT, all 90 cases, Avg@5 ours vs
+published: cpu 0.56 vs 0.72, mem 0.87 vs 0.99, disk 1.00 vs 1.00, socket 0.53 vs 0.83,
+delay 0.49 vs 0.63, loss 0.45 vs 0.64. The port follows RCAEval's code step by step, so
+the leading suspect is the input: `main.py` reads each case's `data.csv` from the Zenodo
+zips, while the Hugging Face Parquet is a conversion of `metrics.json`. Our columns
+include `workload` and `error` families, which jump in many services during any
+incident and can outrank the root cause. Being checked with `scripts/zenodo_peek.py`
+(reads one `data.csv` out of the zip by HTTP range requests) and `reproduce-baro
+--show-misses` / `--exclude`. Until it reproduces, BARO's dev numbers are provisional.
+
+**Finding 2: the recording order leaks the label.** Predicting a case's root cause as the
+service of the nearest *other* injection in time is right 90% of the time on dev (chance
+18% Avg@5): the authors recorded the injections into one service back to back. The
+metric column set leaks too (68%), largely through the same deployment epochs. A
+per-case agent cannot exploit either: it sees one case and no other case's label. But
+anything that carries information across cases can: a lessons ledger (S4), few-shot
+examples, fine-tuning on dev. **Rule from here: nothing that crosses cases may carry
+absolute times, dates or case ids, and any such feature is re-checked with the
+shape-time detector run through it.** Shifting every case to a common epoch would not
+close the channel, since log messages print their own dates.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case

@@ -12,13 +12,14 @@ import pyarrow.parquet as pq
 
 from yi_agent.data.rcaeval import LABELS_PATH, SPLIT_PATH, CaseLabel, read_labels
 from yi_agent.data.split import read_split
+from yi_agent.data.telemetry import read_window
 from yi_agent.eval import baro, baselines
 from yi_agent.eval.case_data import CaseData
 from yi_agent.eval.grade import Graded, grade
 from yi_agent.eval.grounding import oracle_evidence
 from yi_agent.eval.harness import RESULTS_DIR, check_approval, provenance, write_json
 from yi_agent.eval.report import read_trials, write_trials
-from yi_agent.eval.scoring import avg_at
+from yi_agent.eval.scoring import avg_at, normalize_service, service_of_metric
 from yi_agent.eval.tables import breakdown, render
 
 SPLITS = ("dev", "dev_small", "test", "all")
@@ -95,14 +96,31 @@ def run_baseline(
     return path, table
 
 
-def reproduce_baro(data_dir: Path, systems: Sequence[str], progress: Progress | None = None) -> str:
+def reproduce_baro(
+    data_dir: Path,
+    systems: Sequence[str],
+    progress: Progress | None = None,
+    exclude: tuple[str, ...] = (),
+    show_misses: bool = False,
+) -> str:
     """BARO on every RE2 case of the systems (the exception for untuned baselines,
-    docs/ROADMAP.md), Avg@5 per fault against the published numbers."""
+    docs/ROADMAP.md), Avg@5 per fault against the published numbers. `exclude` and
+    `show_misses` are for diagnosing a gap: which metrics outrank the root cause."""
     labels = [c for c in labels_by_id().values() if c.suite == "re2" and c.system in systems]
     per: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    misses: list[str] = []
     for n, c in enumerate(sorted(labels, key=lambda c: c.name), 1):
-        services = baro.rank_services(baro.rank_metrics(CaseData(data_dir / c.name).window))
+        d = data_dir / c.name
+        window = baro.prepare(d / "metrics.parquet", read_window(d).onset_ms // 1000, exclude)
+        metrics = baro.rank_metrics(window)
+        services = baro.rank_services(metrics)
         per[(c.suite, c.system, c.fault)].append(avg_at(services, c.service))
+        rc = normalize_service(c.service)
+        if show_misses and (not services or services[0] != rc):
+            pos = services.index(rc) + 1 if rc in services else None
+            first_rc = next((m for m, _ in metrics if service_of_metric(m) == rc), None)
+            top = ", ".join(f"{m} {z:.0f}" for m, z in metrics[:3])
+            misses.append(f"  {c.name}: rc at {pos}, its best {first_rc}; top: {top}")
         if progress and n % 30 == 0:
             progress(f"  baro: {n}/{len(labels)} cases")
     lines = [f"{'dataset':<8}{'fault':<8}{'n':>4}{'ours':>7}{'published':>11}{'diff':>7}"]
@@ -112,6 +130,11 @@ def reproduce_baro(data_dir: Path, systems: Sequence[str], progress: Progress | 
         diff = f"{ours - pub:+.2f}" if pub is not None else "-"
         pub_s = f"{pub:.2f}" if pub is not None else "-"
         lines.append(f"{suite}-{system:<4}{fault:<8}{len(xs):>4}{ours:>7.2f}{pub_s:>11}{diff:>7}")
+    if exclude:
+        lines.append(f"(metric families excluded: {', '.join(exclude)})")
+    if misses:
+        lines.append(f"cases where BARO's first service is not the root cause ({len(misses)}):")
+        lines += misses
     return "\n".join(lines)
 
 

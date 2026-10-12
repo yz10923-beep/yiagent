@@ -354,3 +354,17 @@ def test_random_baseline_is_reproducible(cases: tuple[Path, dict[str, CaseLabel]
     assert a == b and a != c
     random.seed(0)  # the baseline must not depend on the global generator
     assert [t.report for t in run("random", cases, seed=3)] == a
+
+
+def test_exclude_drops_whole_metric_families_for_diagnosis(tmp_path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    times = list(range(ONSET_S - 5, ONSET_S + 5))
+    cols = {"time": pa.array(times, pa.int64())}
+    for name in ("a_cpu", "a_workload", "b_error", "b_latency-90"):
+        cols[name] = pa.array([float(i) for i in range(len(times))])
+    pq.write_table(pa.table(cols), tmp_path / "m.parquet")
+    w = baro.prepare(tmp_path / "m.parquet", ONSET_S, exclude=("workload", "error"))
+    assert w.names == ["a_cpu", "b_latency-90"]
+    assert baro.family("ts-order-service_latency-90") == "latency-90"

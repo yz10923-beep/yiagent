@@ -175,7 +175,15 @@ def cmd_eval_score(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_eval_reproduce_baro(settings: Settings, args: argparse.Namespace) -> int:
-    print(eval_run.reproduce_baro(settings.data_dir, args.systems, progress=_progress))
+    print(
+        eval_run.reproduce_baro(
+            settings.data_dir,
+            args.systems,
+            progress=_progress,
+            exclude=tuple(args.exclude),
+            show_misses=args.show_misses,
+        )
+    )
     return 0
 
 
@@ -245,6 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.set_defaults(fn=cmd_eval_score)
     c = ev.add_parser("reproduce-baro", help="BARO on all RE2 cases vs the published numbers")
     c.add_argument("--systems", nargs="+", choices=("ob", "ss", "tt"), default=["tt"])
+    c.add_argument("--exclude", nargs="*", default=[], help="metric families to drop (diagnosis)")
+    c.add_argument("--show-misses", action="store_true", help="top metrics where BARO misses")
     c.set_defaults(fn=cmd_eval_reproduce_baro)
     c = ev.add_parser("evidence-coverage", help="does each case's root-cause indicator exist?")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev")

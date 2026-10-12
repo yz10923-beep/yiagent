@@ -42,10 +42,17 @@ def _ffill_then_zero(x: np.ndarray) -> np.ndarray:
     return np.where(np.isnan(filled), 0.0, filled)
 
 
-def prepare(metrics_path: Path, onset_s: int) -> MetricWindow:
+def family(metric: str) -> str:
+    return metric.split("_", 1)[1] if "_" in metric else ""
+
+
+def prepare(metrics_path: Path, onset_s: int, exclude: tuple[str, ...] = ()) -> MetricWindow:
+    """`exclude` drops metric families (e.g. "workload"): only for diagnosing a gap with
+    the published numbers, never for the BARO baseline itself."""
     table = pq.read_table(metrics_path)
     names = [n for n in table.column_names if n not in ("time", "time.1")]
     names = [n for n in names if not n.endswith("_latency-50")]  # "only select lat-90"
+    names = [n for n in names if family(n) not in exclude]
     # main.py keeps only `ts-` columns for paths containing "mm-tt" or "torai-TT"; the
     # published RE2-TT run reads data/RE2/RE2-TT/..., so that filter never applied to it.
     return prepare_columns(table, names, onset_s)
