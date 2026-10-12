@@ -49,7 +49,12 @@ def family(metric: str) -> str:
 def prepare(metrics_path: Path, onset_s: int, exclude: tuple[str, ...] = ()) -> MetricWindow:
     """`exclude` drops metric families (e.g. "workload"): only for diagnosing a gap with
     the published numbers, never for the BARO baseline itself."""
-    table = pq.read_table(metrics_path)
+    if metrics_path.suffix == ".csv":  # RCAEval's own simple_metrics.csv, for reproduction
+        import pyarrow.csv as pacsv
+
+        table = pacsv.read_csv(metrics_path)
+    else:
+        table = pq.read_table(metrics_path)
     names = [n for n in table.column_names if n not in ("time", "time.1")]
     names = [n for n in names if not n.endswith("_latency-50")]  # "only select lat-90"
     names = [n for n in names if family(n) not in exclude]
@@ -59,8 +64,8 @@ def prepare(metrics_path: Path, onset_s: int, exclude: tuple[str, ...] = ()) -> 
 
 
 def prepare_columns(table: pa.Table, names: list[str], onset_s: int) -> MetricWindow:
-    """inf to NaN, forward-fill, then 0 (over the whole case, as main.py does), then the
-    10 minutes before and after the onset."""
+    """inf to NaN, forward-fill, then 0 (over the whole case, as main.py does), memory to
+    MB, then the 10 minutes before and after the onset."""
     times = table.column("time").to_numpy().astype(np.int64)
     if names:
         data = np.column_stack(
@@ -70,6 +75,12 @@ def prepare_columns(table: pa.Table, names: list[str], onset_s: int) -> MetricWi
         data = np.empty((len(times), 0))
     data[~np.isfinite(data)] = np.nan
     data = _ffill_then_zero(data)
+    # RCAEval's convert_mem_mb: memory in MB, not bytes. Robust z is unit-free except when a
+    # series is flat before the onset: its spread is 0, the scale becomes 1, and z is the
+    # raw change, so in bytes one 4 KB page would outrank a 50x CPU jump (VM, 2026-10-12).
+    for j, n in enumerate(names):
+        if n.endswith("_mem"):
+            data[:, j] /= 1e6
     before_rows = np.flatnonzero(times < onset_s)[-HALF_WINDOW_ROWS:]
     after_rows = np.flatnonzero(times >= onset_s)[:HALF_WINDOW_ROWS]
     # main.py renames `_latency-90` to `_latency`; the service prefix is unchanged by it.

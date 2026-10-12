@@ -144,9 +144,11 @@ Done in S2 so far (decisions and the paper's facts in `docs/ROADMAP.md`):
 Not done yet, in order:
 1. **S2 on the VM (Yi):** first run done (ROADMAP "First VM run"): oracle 1.00, random at
    chance, coverage 74/77, harness `6ad6f3dc` approved. Open: **BARO does not reproduce**
-   the published RE2-TT numbers (0.12-0.30 low on 5 of 6 faults); diagnose with
-   `scripts/zenodo_peek.py` (does RCAEval's `data.csv` differ from our Parquet?) and
-   `reproduce-baro --show-misses / --exclude`, fix, then Yi re-approves and rescores.
+   the published RE2-TT numbers (0.12-0.30 low on 5 of 6 faults). Found so far: a port
+   bug (memory not converted to MB; fixed) and a different input (RCAEval reads
+   `simple_metrics.csv`, a subset). Next: Yi reruns on Parquet, extracts RCAEval's CSVs
+   with `scripts/zenodo_peek.py extract` and reproduces on them; then re-approves and
+   rescores the baselines.
    **Recording order leaks the label** (nearest injection in time: 90% top-1): nothing
    that crosses cases may carry times, dates or case ids (ROADMAP).
 2. **S3, the agent:** the loop (~200 lines, Yi must be able to explain it), read-only

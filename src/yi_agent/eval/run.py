@@ -102,16 +102,23 @@ def reproduce_baro(
     progress: Progress | None = None,
     exclude: tuple[str, ...] = (),
     show_misses: bool = False,
+    metrics_file: Path | None = None,
 ) -> str:
     """BARO on every RE2 case of the systems (the exception for untuned baselines,
     docs/ROADMAP.md), Avg@5 per fault against the published numbers. `exclude` and
-    `show_misses` are for diagnosing a gap: which metrics outrank the root cause."""
+    `show_misses` are for diagnosing a gap: which metrics outrank the root cause.
+    `metrics_file` (e.g. simple_metrics.csv, extracted from the Zenodo zips by
+    scripts/zenodo_peek.py into data_dir/<case>/) runs the port on RCAEval's own input."""
     labels = [c for c in labels_by_id().values() if c.suite == "re2" and c.system in systems]
     per: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     misses: list[str] = []
     for n, c in enumerate(sorted(labels, key=lambda c: c.name), 1):
         d = data_dir / c.name
-        window = baro.prepare(d / "metrics.parquet", read_window(d).onset_ms // 1000, exclude)
+        if metrics_file is None:
+            path, onset_s = d / "metrics.parquet", read_window(d).onset_ms // 1000
+        else:
+            path, onset_s = d / metrics_file.name, int((d / "inject_time.txt").read_text())
+        window = baro.prepare(path, onset_s, exclude)
         metrics = baro.rank_metrics(window)
         services = baro.rank_services(metrics)
         per[(c.suite, c.system, c.fault)].append(avg_at(services, c.service))
@@ -132,6 +139,8 @@ def reproduce_baro(
         lines.append(f"{suite}-{system:<4}{fault:<8}{len(xs):>4}{ours:>7.2f}{pub_s:>11}{diff:>7}")
     if exclude:
         lines.append(f"(metric families excluded: {', '.join(exclude)})")
+    if metrics_file is not None:
+        lines.append(f"(input: {metrics_file.name} under {data_dir})")
     if misses:
         lines.append(f"cases where BARO's first service is not the root cause ({len(misses)}):")
         lines += misses

@@ -177,11 +177,12 @@ def cmd_eval_score(settings: Settings, args: argparse.Namespace) -> int:
 def cmd_eval_reproduce_baro(settings: Settings, args: argparse.Namespace) -> int:
     print(
         eval_run.reproduce_baro(
-            settings.data_dir,
+            args.data_dir or settings.data_dir,
             args.systems,
             progress=_progress,
             exclude=tuple(args.exclude),
             show_misses=args.show_misses,
+            metrics_file=args.metrics_file,
         )
     )
     return 0
@@ -255,6 +256,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--systems", nargs="+", choices=("ob", "ss", "tt"), default=["tt"])
     c.add_argument("--exclude", nargs="*", default=[], help="metric families to drop (diagnosis)")
     c.add_argument("--show-misses", action="store_true", help="top metrics where BARO misses")
+    c.add_argument("--data-dir", type=Path, help="case directories (default: YI_DATA_DIR)")
+    c.add_argument(
+        "--metrics-file", type=Path, help="read this file per case, e.g. simple_metrics.csv"
+    )
     c.set_defaults(fn=cmd_eval_reproduce_baro)
     c = ev.add_parser("evidence-coverage", help="does each case's root-cause indicator exist?")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev")

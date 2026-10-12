@@ -368,3 +368,28 @@ def test_exclude_drops_whole_metric_families_for_diagnosis(tmp_path: Path) -> No
     w = baro.prepare(tmp_path / "m.parquet", ONSET_S, exclude=("workload", "error"))
     assert w.names == ["a_cpu", "b_latency-90"]
     assert baro.family("ts-order-service_latency-90") == "latency-90"
+
+
+def test_memory_is_scored_in_megabytes_as_rcaeval_does(tmp_path: Path) -> None:
+    """The VM's BARO gap: a flat memory series has zero spread, so its z is the raw change.
+    In bytes, one 4 KB page (4096) would outrank a real CPU jump; in MB it is 0.004."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    times = list(range(ONSET_S - 50, ONSET_S + 50))
+    before = [ONSET_S > t for t in times]
+    cols = {
+        "time": pa.array(times, pa.int64()),
+        # mostly flat before: one blip keeps the column (a constant one is dropped) while
+        # the interquartile range stays 0; after, one 4 KB page comes and goes
+        "bystander_mem": [
+            (100e6 + (4096 if i == 0 else 0)) if b else 100e6 + 4096 * (i % 2)
+            for i, b in enumerate(before)
+        ],
+        # noisy both sides (a column constant in either half is dropped, as in RCAEval)
+        "culprit_cpu": [float(10 + i % 3) + (0 if b else 190) for i, b in enumerate(before)],
+    }
+    pq.write_table(pa.table(cols), tmp_path / "m.parquet")
+    ranked = baro.rank_metrics(baro.prepare(tmp_path / "m.parquet", ONSET_S))
+    assert ranked[0][0] == "culprit_cpu"
+    assert dict(ranked)["bystander_mem"] == pytest.approx(0.004096)

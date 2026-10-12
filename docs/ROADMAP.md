@@ -238,6 +238,23 @@ incident and can outrank the root cause. Being checked with `scripts/zenodo_peek
 (reads one `data.csv` out of the zip by HTTP range requests) and `reproduce-baro
 --show-misses` / `--exclude`. Until it reproduces, BARO's dev numbers are provisional.
 
+Diagnosis (VM, 2026-10-12):
+- **A port bug: memory units.** `--show-misses` showed nearly every miss led by a `_mem`
+  metric scoring 4096, 8192, 135168: exact multiples of a 4 KB page. A memory series
+  flat before the onset has an interquartile range of 0, the scaler's scale becomes 1,
+  and the score is the raw change in bytes. RCAEval converts memory to MB first
+  (`convert_mem_mb`), which the port skipped on the reasoning that robust z is unit-free:
+  true, except exactly in the zero-spread case. Fixed in `prepare_columns`, so grounding
+  (a "mem went up" citation) uses MB too; regression test in `tests/unit/test_eval.py`.
+- **The input differs.** The Zenodo RE2 cases have no `data.csv`, so `main.py` reads
+  `simple_metrics.csv` (6 MB against the full `metrics.csv` at 27 MB in
+  ts-order-service_cpu_1): the published numbers use a subset of the metrics. Excluding
+  `workload` and `error` changed nothing, so it is not those two families.
+- Next: re-run on our Parquet with the fix, and run the port on RCAEval's own input
+  (`zenodo_peek.py extract RE2-TT simple_metrics.csv`, then `reproduce-baro --data-dir
+  ... --metrics-file simple_metrics.csv`). Matching there proves the port; any gap left
+  on our Parquet is then the input, and BARO is reported on both.
+
 **Finding 2: the recording order leaks the label.** Predicting a case's root cause as the
 service of the nearest *other* injection in time is right 90% of the time on dev (chance
 18% Avg@5): the authors recorded the injections into one service back to back. The
