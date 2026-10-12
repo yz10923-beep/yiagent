@@ -156,11 +156,13 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
 - The runner (`agent/runner.py`, `yi agent run`): one condition per results directory,
   resumable, N cases at once, trajectories + transcripts + spans per case, scored by the
   approved harness (hash unchanged by S3) and printed beside BARO.
-- 497 unit + 17 Elasticsearch tests.
+- Default model Sonnet 5.5 at effort high (Yi's call, 2026-10-12: half Opus 5.5's price;
+  Opus is measured once as S4's model A/B instead of assumed). Haiku 5.5 for plumbing.
+- 498 unit + 17 Elasticsearch tests.
 
 Not done yet, in order:
-1. **S3 on the VM (Yi, paid):** `yi agent run --split dev_small --limit 1`, then the
-   rest; BARO on dev_small for the comparison (SETUP step 9). Then the S3 write-up.
+1. **S3 on the VM (Yi, paid):** a Haiku smoke run over dev_small, one Sonnet case, then
+   the rest; BARO on dev_small for the comparison (SETUP step 9). Then the S3 write-up.
 2. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)

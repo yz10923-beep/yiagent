@@ -148,6 +148,15 @@ def test_request_shape() -> None:
     assert req["fallbacks"] == "default" and req["betas"] == ["server-side-fallback-2026-07-01"]
 
 
+def test_sonnet_5_5_gets_the_default_fallback_too() -> None:
+    p = AnthropicProvider(model="claude-sonnet-5-5", max_tokens=1, api_key="k")
+    req = p.build_request(system="s", messages=[], tools=[])
+    assert req["fallbacks"] == "default"
+    assert "fallbacks" not in AnthropicProvider(
+        model="claude-sonnet-5", max_tokens=1, api_key="k"
+    ).build_request(system="s", messages=[], tools=[])
+
+
 def test_fallback_not_sent_for_unsupported_models_or_when_disabled() -> None:
     for p in (
         AnthropicProvider(model="claude-haiku-4-5", max_tokens=1, api_key="k"),

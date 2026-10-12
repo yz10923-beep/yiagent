@@ -8,7 +8,7 @@ ported in either direction.
 | Here | kama | Changes |
 |---|---|---|
 | `src/yi_agent/llm/types.py` | `core/llm/types.py` | none |
-| `src/yi_agent/llm/anthropic_provider.py` | `core/llm/anthropic_provider.py` | import paths |
+| `src/yi_agent/llm/anthropic_provider.py` | `core/llm/anthropic_provider.py` | import paths; refusal fallback (`fallbacks: "default"`) also on Sonnet 5.5 (2026-10-12) |
 | `src/yi_agent/llm/pricing.py` | `core/llm/pricing.py` | rewritten 2026-10-11 from the live pricing page: per-model published rates instead of 0.1x/1.25x multipliers (Opus 5.5, Sonnet 5.5, Fable 5.1 read cache cheaper), Haiku 5.5 long-prompt card, exact/dated id match instead of prefix. **Port to kama**: its table has the same 0.1x and prefix bugs |
 | `src/yi_agent/config.py` | `core/config.py` | `YI_` prefix, `~/.yi/.env`, only this project's fields, `~` expanded in `data_dir`, defaults validated |
 | `src/yi_agent/llm/retry.py` | `core/llm/retry.py` | import paths |

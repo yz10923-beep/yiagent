@@ -36,7 +36,9 @@ from yi_agent.eval.harness import HarnessNotApproved
 from yi_agent.llm.anthropic_provider import AnthropicProvider
 
 SPLITS = ("dev", "dev_small", "test", "all")
-DEFAULT_MODEL = "claude-opus-5-5"
+# Development runs on Sonnet 5.5 (half Opus 5.5's price on every rate); the model
+# itself is measured as an S4 A/B, not assumed (docs/ROADMAP.md, S3 decisions).
+DEFAULT_MODEL = "claude-sonnet-5-5"
 
 
 def _labels() -> dict[str, CaseLabel]:

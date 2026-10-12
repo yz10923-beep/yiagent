@@ -336,9 +336,19 @@ What this says about where the agent can win (S3's hypotheses, not results):
   case or suite (tested); it describes the 11 fault types as the paper injects them. The
   agent is not told the suite (RE2 or RE3), so it chooses among all 11; BARO's fault
   guess is given the suite. The case enters only through the alert.
-- **Default model `claude-opus-5-5` at effort high**, with the API's refusal fallback on
-  (`fallbacks: "default"`; a fallback's tokens are priced at the model that served
-  them). Model, effort and step budget are flags; each combination is its own variant.
+- **Default model `claude-sonnet-5-5` at effort high** (Yi, 2026-10-12; first planned as
+  Opus 5.5). Sonnet 5.5 is exactly half Opus 5.5's price on every rate (input, cache
+  write, cache read, output; pricing page checked 2026-10-12), and nothing S3 or S4 must
+  prove depends on the strongest model: "agent vs BARO" is a claim about the agent *on
+  model M*, and an S4 A/B compares two variants on the same model. What the cheaper
+  model buys is statistical power: dev_small's 24 cases give AC@1 a 95% interval about
+  +-0.2 wide, so real A/B effects need the 77-case dev split, affordable on Sonnet. The
+  model is measured, not assumed: one Opus 5.5 variant on the same split is S4's model
+  A/B ("does Opus buy enough accuracy for 2x the cost?"). Haiku 5.5 (1/20 of Sonnet)
+  runs the plumbing on real data first; its scores are not results. Refusal fallback on
+  (`fallbacks: "default"`, Opus 5.5 and Sonnet 5.5; a fallback's tokens are priced at the
+  model that served them). Model, effort and step budget are flags; each combination is
+  its own variant.
 - **One condition per results directory** (`run.json`: model, effort, step budget,
   prompt and tool-table hashes, loop version); a mismatch stops the run. The harness hash
   is unchanged by S3 (the agent lives outside the hashed files), and an unapproved

@@ -145,7 +145,9 @@ the binding to 0.0.0.0.
 
    ```bash
    cd ~/yiagent && git pull && uv sync && make verify && make es-up
-   uv run yi agent run --split dev_small --limit 1      # one case: check it works, see its cost
+   # plumbing on real data, near free (Haiku 5.5); its scores are not results
+   uv run yi agent run --split dev_small --model claude-haiku-5-5 --variant smoke-haiku
+   uv run yi agent run --split dev_small --limit 1      # one Sonnet 5.5 case: its real cost
    uv run yi agent run --split dev_small                # the rest (resumes; 3 cases at a time)
    uv run yi eval baseline baro --split dev_small       # BARO on the same 24 cases, to compare
    uv run yi agent run --split dev_small                # again: prints the scores beside BARO's

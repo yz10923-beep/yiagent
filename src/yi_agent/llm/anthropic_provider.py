@@ -26,7 +26,7 @@ from yi_agent.llm.types import (
 # Server-side refusal fallback: on a safety decline the API re-runs the request on
 # another model inside the same call. Only some models accept the parameter.
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
-_FALLBACK_MODELS = ("claude-opus-5", "claude-fable-5-1")
+_FALLBACK_MODELS = ("claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5")
 
 # S6: on-demand compaction (the server writes the summary). The header goes on the
 # compaction request and on every later request that carries the returned block.
