@@ -164,7 +164,7 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   $0.005/case, against BARO 0.17, the tool alone 0.21 and the Haiku placebo 0.21 (no
   leak; Sock Shop's floor is a prior over its few business services). Fault type is
   weak (F1 RE2 0.35, RE3 0.00). `yi agent compare` prints variants side by side.
-- 500 unit + 21 Elasticsearch tests.
+- 504 unit + 21 Elasticsearch tests.
 
 Not done yet, in order:
 1. **S3 on the VM (Yi):** load dev (77 cases), then on dev: the tool-only control, Haiku,

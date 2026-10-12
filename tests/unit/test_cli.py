@@ -43,3 +43,30 @@ def test_reproducing_on_a_half_extracted_input_names_the_gap(
     err = capsys.readouterr().err
     assert "90 of 90 cases lack simple_metrics.csv or inject_time.txt" in err
     assert "Traceback" not in err
+
+
+@pytest.mark.parametrize(
+    ("argv", "fn"),
+    [
+        (["agent", "run", "--split", "dev", "--model", "policy:metric-top"], "cmd_agent_run"),
+        (["agent", "run", "--placebo", "--variant", "p"], "cmd_agent_run"),
+        (["agent", "compare", "baro", "sonnet", "--group", "all", "re2-tt"], "cmd_agent_compare"),
+    ],
+)
+def test_every_agent_command_reaches_its_own_handler(argv: list[str], fn: str) -> None:
+    # A subcommand added in the wrong place once took `run`'s handler (VM, 2026-10-12).
+    args = cli.build_parser().parse_args(argv)
+    assert args.fn.__name__ == fn
+
+
+def test_every_subcommand_has_a_handler() -> None:
+    import argparse
+
+    parser = cli.build_parser()
+    groups = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+    for group in groups:
+        for name, sub in group.choices.items():
+            for inner in sub._actions:
+                if isinstance(inner, argparse._SubParsersAction):
+                    for cmd, leaf in inner.choices.items():
+                        assert leaf.get_default("fn") is not None, f"yi {name} {cmd}"
