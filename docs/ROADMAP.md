@@ -416,6 +416,9 @@ Chance Avg@5 is 0.19. Reading:
   faults are injected into, without evidence. That is a prior, not a leak, and it means
   uniform chance understates the null in a small system: **the placebo is the honest
   floor**, per system.
+- dev loaded (2026-10-12): all 77 cases complete and verified (52.3M documents, 206
+  indices, cluster green), 53 of them in about 40 minutes. The load looked frozen only
+  because its output went through `| tail -3`, which prints nothing until the end.
 - **Still to show:** the full dev split (77 cases; dev_small's intervals are wide),
   Sonnet 5.5, and the fault type, which no method gets (RE2 F1 0.35, RE3 0.00).
 

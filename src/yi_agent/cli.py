@@ -118,7 +118,7 @@ def cmd_audit(settings: Settings, args: argparse.Namespace) -> int:
 def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
     labels = _labels()
     es = _es(settings)
-    total_docs, total_s, failed = 0, 0.0, []
+    total_docs, total_s, failed, reused = 0, 0.0, [], 0
     ids = _ids(args, labels)
     loader = ensure_loaded if args.keep else load_case
 
@@ -134,13 +134,14 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
             print(f"{i}: FAILED {e}")
             failed.append(i)
             continue
-        total_docs += report.docs
+        if report.reused:
+            reused += 1
+            print(f"{i}: {report.docs:>8} docs already loaded (complete, loader v{LOADER_VERSION})")
+            continue
+        total_docs += report.docs  # only what this run loaded: a reuse is not a load rate
         total_s += report.seconds
         units = {k: f"{s.time_column}:{s.time_unit}" for k, s in report.stats.items()}
         skipped = sum(s.skipped_nonfinite + s.skipped_no_time for s in report.stats.values())
-        if report.reused:
-            print(f"{i}: {report.docs:>8} docs already loaded (complete, loader v{LOADER_VERSION})")
-            continue
         print(
             f"{i}: {report.docs:>8} docs in {report.seconds:5.1f}s "
             f"({report.docs / max(report.seconds, 1e-9):,.0f}/s) {report.indices} "
@@ -152,7 +153,9 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
         if not args.keep:
             unload_case(es, i)
     if total_s:
-        print(f"total {total_docs} docs in {total_s:.1f}s ({total_docs / total_s:,.0f}/s)")
+        print(f"loaded {total_docs} docs in {total_s:.1f}s ({total_docs / total_s:,.0f}/s)")
+    if reused:
+        print(f"{reused} of {len(ids)} cases were already loaded and complete")
     if failed:
         print(f"{len(failed)} cases failed to load: {failed}")
     return 1 if failed else 0
