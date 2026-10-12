@@ -422,3 +422,21 @@ async def test_the_metric_top_policy_is_a_free_control_through_the_real_loop(
         assert check(r.report.evidence[0], CaseData(case_dir)).holds
     finally:
         unload_case(es, label.id)
+
+
+async def test_compare_puts_variants_side_by_side_from_their_scores(
+    es: Elasticsearch, tmp_path: Path, dev_small: tuple[Path, list[CaseLabel]]
+) -> None:
+    from yi_agent.agent.policies import MetricTopPolicy
+    from yi_agent.agent.runner import compare
+
+    data_dir, _ = dev_small
+    out_dir = tmp_path / "results"
+    cond = Condition(model="policy:metric-top", effort="high", max_steps=5)
+    await run_split(
+        "dev_small", data_dir, es, MetricTopPolicy, cond, variant="top", results_dir=out_dir
+    )
+    table = compare("dev_small", ["top", "missing"], "all", results_dir=out_dir)
+    row = next(line for line in table.splitlines() if line.startswith("top "))
+    assert " 24 " in row and "0.0000" in row and "other harness" not in row
+    assert "missing" in table and "no scores.json" in table

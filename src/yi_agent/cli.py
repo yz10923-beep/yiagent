@@ -16,7 +16,7 @@ from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import Elasticsearch
 
 from yi_agent.agent.policies import POLICIES
-from yi_agent.agent.runner import Condition, ConditionChanged, run_split
+from yi_agent.agent.runner import Condition, ConditionChanged, compare, run_split
 from yi_agent.config import ConfigError, Settings, load_settings
 from yi_agent.data.alert import make_alert
 from yi_agent.data.check import AuditResult, audit_case, check_download, inspect_case
@@ -240,6 +240,12 @@ def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_compare(settings: Settings, args: argparse.Namespace) -> int:
+    for group in args.group:
+        print(compare(args.split, args.variants, group))
+    return 0
+
+
 def cmd_unload(settings: Settings, args: argparse.Namespace) -> int:
     es = _es(settings)
     for i in args.ids:
@@ -330,6 +336,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="control: a false onset 6 min early, nothing visible from the real one on",
     )
+    c = ag.add_parser("compare", help="variants side by side, from their scores (free)")
+    c.add_argument("variants", nargs="+", help="results directories, e.g. baro agent")
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
+    c.add_argument("--group", nargs="+", default=["all"], help="e.g. all re2-tt 're2 delay'")
+    c.set_defaults(fn=cmd_agent_compare)
     c.set_defaults(fn=cmd_agent_run)
     return p
 

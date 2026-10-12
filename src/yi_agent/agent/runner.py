@@ -272,3 +272,54 @@ def _versus_baro(run_dir: Path, baro_scores: Path) -> str:
             f"{r['avg5']:>8.2f} / {b['avg5']:<6.2f}"
         )
     return "\n".join(out)
+
+
+def compare(
+    split: str, variants: Sequence[str], group: str = "all", results_dir: Path = RESULTS_DIR
+) -> str:
+    """One row per variant from its scores.json and trajectories (nothing re-run or
+    re-graded): the S3 results table. A row graded by another harness is flagged."""
+    from yi_agent.eval.harness import harness_sha
+
+    sha = harness_sha()
+    head = (
+        f"{'variant':<22}{'n':>4}  {'AC@1':>5} {'95% CI':>11} {'AC@3':>5} {'Avg@5':>6} "
+        f"{'chance':>6}  {'F1 re2':>6} {'F1 re3':>6}  {'target':>6}  {'$/case':>7} {'steps':>5}"
+    )
+    lines = [f"{split}, group {group!r}", head, "-" * len(head)]
+    for v in variants:
+        run_dir = results_dir / v / split
+        path = run_dir / "scores.json"
+        if not path.exists():
+            lines.append(f"{v:<22}  (no scores.json: not run to the end, or not this split)")
+            continue
+        scores = json.loads(path.read_text())
+        r = scores["summary"].get(group)
+        if not r or not r.get("cases"):
+            lines.append(f"{v:<22}  (no cases in group {group!r})")
+            continue
+        cost, steps = "-", "-"
+        tpath = run_dir / "trajectories.jsonl"
+        if tpath.exists():
+            last = {}
+            for line in tpath.read_text().splitlines():
+                t = json.loads(line)
+                last[t["case_id"]] = t
+            rows = list(last.values())
+            if rows and all(t["cost_usd"] is not None for t in rows):
+                cost = f"{sum(t['cost_usd'] for t in rows) / len(rows):.4f}"
+            if rows:
+                steps = f"{sum(t['steps'] for t in rows) / len(rows):.1f}"
+
+        def f(key: str, r: dict[str, Any] = r) -> str:
+            x = r.get(key)
+            return f"{x:.2f}" if isinstance(x, float) else "-"
+
+        lo, hi = r["ac1_ci95"]
+        flag = "" if scores.get("harness_sha256") == sha else "  !! other harness"
+        lines.append(
+            f"{v:<22}{r['cases']:>4}  {f('ac1'):>5} {f'{lo:.2f}-{hi:.2f}':>11} {f('ac3'):>5} "
+            f"{f('avg5'):>6} {f('chance_avg5'):>6}  {f('fault_macro_f1_re2'):>6} "
+            f"{f('fault_macro_f1_re3'):>6}  {f('on_target'):>6}  {cost:>7} {steps:>5}{flag}"
+        )
+    return "\n".join(lines)

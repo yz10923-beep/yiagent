@@ -392,6 +392,33 @@ accept without controls, run before any paid Sonnet run:
    pre-fault data. It should land near chance (Avg@5 0.19 here). Above chance means
    something other than the fault points at the answer: a leak inside the case's data.
 
+Controls (VM, 2026-10-12), dev_small, 24 cases:
+
+| run | AC@1 (95% CI) | AC@3 | Avg@5 | F1 re2 | F1 re3 | on target | $/case |
+|---|---|---|---|---|---|---|---|
+| BARO | 0.17 (0.07-0.36) | 0.79 | 0.67 | 0.19 | 0.00 | 0.17 | 0 |
+| policy:metric-top (the tool, no model) | 0.21 (0.09-0.40) | 0.83 | 0.69 | 0.19 | 0.00 | 0.21 | 0 |
+| Haiku 5.5, placebo (pre-fault data only) | 0.21 (0.09-0.40) | 0.38 | 0.33 | 0.05 | 0.00 | 0.20 | 0.014 |
+| Haiku 5.5, run 1 | 0.92 (0.74-0.98) | 0.96 | 0.95 | 0.35 | 0.00 | 0.79 | 0.005 |
+| Haiku 5.5, run 2 | 1.00 (0.86-1.00) | 1.00 | 1.00 | 0.36 | 0.00 | 0.81 | 0.006 |
+
+Chance Avg@5 is 0.19. Reading:
+- **The tool is not the gain.** Its ranking alone scores like BARO (0.21 vs 0.17 top-1;
+  0.83 vs 0.79 top-3): the same statistic, and dropping BARO's zero-fill changes little.
+  Its first answer is usually shared infrastructure whose metrics barely move but were
+  flat before (redis in Online Boutique, session-db in Sock Shop), with the root cause
+  second (Avg@5 0.8 in those cases). Choosing among the top few is what the model adds,
+  as S2's numbers predicted (BARO top-3 0.87, top-1 0.25 on dev).
+- **No leak found by the placebo.** Without the fault's data the agent falls to Avg@5
+  0.33, and works harder for it (15 steps, 35 tool calls, citations that hold only 27%
+  of the time). What it keeps above chance comes almost all from Sock Shop (Avg@5 0.87
+  against a uniform 0.27): it names carts, orders and payment, the business services
+  faults are injected into, without evidence. That is a prior, not a leak, and it means
+  uniform chance understates the null in a small system: **the placebo is the honest
+  floor**, per system.
+- **Still to show:** the full dev split (77 cases; dev_small's intervals are wide),
+  Sonnet 5.5, and the fault type, which no method gets (RE2 F1 0.35, RE3 0.00).
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case

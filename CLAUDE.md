@@ -160,14 +160,15 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   Opus is measured once as S4's model A/B instead of assumed). Haiku 5.5 for plumbing.
 - Controls (`agent/policies.py`, `--placebo`): a free scripted policy that answers with
   the tool's ranking (no model), and a placebo that shows only pre-fault data.
-- First VM runs: Haiku 5.5 on dev_small AC@1 0.92 and 1.00 at $0.005/case; fault-type
-  F1 weak (RE2 0.35, RE3 0.00). Not trusted until BARO on dev_small, the metric-top
-  control and the placebo are in (ROADMAP "S3 status").
-- 500 unit + 20 Elasticsearch tests.
+- First VM runs, dev_small (ROADMAP "S3 status"): Haiku 5.5 AC@1 0.92 and 1.00 at
+  $0.005/case, against BARO 0.17, the tool alone 0.21 and the Haiku placebo 0.21 (no
+  leak; Sock Shop's floor is a prior over its few business services). Fault type is
+  weak (F1 RE2 0.35, RE3 0.00). `yi agent compare` prints variants side by side.
+- 500 unit + 21 Elasticsearch tests.
 
 Not done yet, in order:
-1. **S3 on the VM (Yi):** the three controls (BARO on dev_small, policy:metric-top,
-   Haiku placebo), then Sonnet 5.5 on dev_small (SETUP step 9). Then the S3 write-up.
+1. **S3 on the VM (Yi):** load dev (77 cases), then on dev: the tool-only control, Haiku,
+   the Haiku placebo and Sonnet 5.5; `yi agent compare`. Then the S3 write-up.
 2. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
