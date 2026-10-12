@@ -163,7 +163,7 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
 - First VM runs: Haiku 5.5 on dev_small AC@1 0.92 and 1.00 at $0.005/case; fault-type
   F1 weak (RE2 0.35, RE3 0.00). Not trusted until BARO on dev_small, the metric-top
   control and the placebo are in (ROADMAP "S3 status").
-- 501 unit + 20 Elasticsearch tests.
+- 500 unit + 20 Elasticsearch tests.
 
 Not done yet, in order:
 1. **S3 on the VM (Yi):** the three controls (BARO on dev_small, policy:metric-top,
