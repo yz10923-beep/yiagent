@@ -50,14 +50,27 @@ class ToolInfraError(Exception):
 class CaseIndices:
     """Read-only access to one case's indices. Nothing else is reachable through it."""
 
-    def __init__(self, es: Elasticsearch, case_id: str, sources: tuple[Kind, ...]) -> None:
+    def __init__(
+        self,
+        es: Elasticsearch,
+        case_id: str,
+        sources: tuple[Kind, ...],
+        ceiling_ms: int | None = None,
+    ) -> None:
         self._es = es
         self._case_id = case_id
         self.sources = sources
+        # The placebo control: nothing at or after this time is visible to any query.
+        self.ceiling_ms = ceiling_ms
 
     def search(self, kind: Kind, **body: Any) -> dict[str, Any]:
         if kind not in self.sources:
             raise ToolError(f"no {kind} were collected for this incident")
+        if self.ceiling_ms is not None:
+            below = {"range": {"@timestamp": {"lt": self.ceiling_ms}}}
+            body["query"] = {
+                "bool": {"must": [body.get("query", {"match_all": {}})], "filter": [below]}
+            }
         try:
             return dict(self._es.search(index=index_name(self._case_id, kind), **body))
         except ApiError as e:
@@ -68,8 +81,8 @@ class CaseIndices:
             raise ToolInfraError(f"Elasticsearch unreachable: {e}") from e
 
 
-def _window(onset_ms: int, which: str) -> dict[str, Any]:
-    lo, hi = onset_ms - HALF_WINDOW_MS, onset_ms + HALF_WINDOW_MS
+def _window(onset_ms: int, which: str, half_ms: int = HALF_WINDOW_MS) -> dict[str, Any]:
+    lo, hi = onset_ms - half_ms, onset_ms + half_ms
     rng = {"before": (lo, onset_ms), "after": (onset_ms, hi), "all": (lo, hi)}
     if which not in rng:
         raise ToolError(f"window must be one of {sorted(rng)}")
@@ -127,12 +140,19 @@ def _rel(at_ms: int, onset_ms: int) -> str:
 class CaseTools:
     data: CaseIndices
     onset_ms: int
+    half_window_ms: int = HALF_WINDOW_MS
+
+    def _w(self, which: str) -> dict[str, Any]:
+        return _window(self.onset_ms, which, self.half_window_ms)
 
     # --- discovery -----------------------------------------------------------------
 
     def overview(self) -> str:
         """Which services exist, by source, with activity before and after the onset."""
-        out = [f"times: onset = t+0s; windows are 10 minutes on each side ({self.data.sources})"]
+        minutes = self.half_window_ms // 60_000
+        out = [
+            f"times: onset = t+0s; windows are {minutes} minutes on each side ({self.data.sources})"
+        ]
         if "metrics" in self.data.sources:
             r = self.data.search(
                 "metrics", size=0, aggs={"m": {"terms": {"field": "metric", "size": 5000}}}
@@ -144,8 +164,8 @@ class CaseTools:
             out.append(f"metrics: {len(fams)} services (metric name = <service>_<family>)")
             out += [f"  {s}: {', '.join(sorted(f))}" for s, f in sorted(fams.items())]
         split = {
-            "before": {"filter": _window(self.onset_ms, "before")},
-            "after": {"filter": _window(self.onset_ms, "after")},
+            "before": {"filter": self._w("before")},
+            "after": {"filter": self._w("after")},
         }
         if "logs" in self.data.sources:
             r = self.data.search(
@@ -153,7 +173,7 @@ class CaseTools:
                 size=0,
                 aggs={"c": {"terms": {"field": "container_name", "size": 500}, "aggs": split}},
             )
-            out.append("logs: lines per container, 10 min before / 10 min after the onset")
+            out.append("logs: lines per container, before / after the onset")
             for b in r["aggregations"]["c"]["buckets"]:
                 out.append(f"  {b['key']}: {b['before']['doc_count']} / {b['after']['doc_count']}")
         if "traces" in self.data.sources:
@@ -184,7 +204,7 @@ class CaseTools:
     ) -> str:
         """Each metric scored the way BARO scores it: the 10 minutes after the onset
         against the median and interquartile range of the 10 minutes before."""
-        filters: list[dict[str, Any]] = [_window(self.onset_ms, "all")]
+        filters: list[dict[str, Any]] = [self._w("all")]
         if service:
             filters.append({"prefix": {"metric": service + "_"}})
         if family:
@@ -198,7 +218,7 @@ class CaseTools:
                     "terms": {"field": "metric", "size": 5000},
                     "aggs": {
                         "before": {
-                            "filter": _window(self.onset_ms, "before"),
+                            "filter": self._w("before"),
                             "aggs": {
                                 "q": {
                                     "percentiles": {
@@ -210,7 +230,7 @@ class CaseTools:
                             },
                         },
                         "after": {
-                            "filter": _window(self.onset_ms, "after"),
+                            "filter": self._w("after"),
                             "aggs": {"s": {"stats": {"field": "value"}}},
                         },
                     },
@@ -260,9 +280,7 @@ class CaseTools:
         r = self.data.search(
             "metrics",
             size=0,
-            query={
-                "bool": {"filter": [{"term": {"metric": metric}}, _window(self.onset_ms, "all")]}
-            },
+            query={"bool": {"filter": [{"term": {"metric": metric}}, self._w("all")]}},
             aggs={
                 "t": {
                     "histogram": {
@@ -319,7 +337,7 @@ class CaseTools:
                 }
             )
         filters = [*_service_filter("container_name", service)]
-        q = {"bool": {"must": must, "filter": [*filters, _window(self.onset_ms, window)]}}
+        q = {"bool": {"must": must, "filter": [*filters, self._w(window)]}}
         r = self.data.search(
             "logs",
             size=0,
@@ -353,9 +371,7 @@ class CaseTools:
             rb = self.data.search(
                 "logs",
                 size=0,
-                query={
-                    "bool": {"must": must, "filter": [*filters, _window(self.onset_ms, "before")]}
-                },
+                query={"bool": {"must": must, "filter": [*filters, self._w("before")]}},
                 aggs={
                     "m": {
                         "terms": {
@@ -419,7 +435,7 @@ class CaseTools:
                 "bool": {
                     "filter": [
                         *_service_filter("serviceName", service),
-                        _window(self.onset_ms, "all"),
+                        self._w("all"),
                     ]
                 }
             },
@@ -431,10 +447,10 @@ class CaseTools:
                             "terms": {"field": "operationName", "size": 200, "missing": "-"},
                             "aggs": {
                                 "before": {
-                                    "filter": _window(self.onset_ms, "before"),
+                                    "filter": self._w("before"),
                                     "aggs": side,
                                 },
-                                "after": {"filter": _window(self.onset_ms, "after"), "aggs": side},
+                                "after": {"filter": self._w("after"), "aggs": side},
                             },
                         }
                     },
@@ -482,7 +498,7 @@ class CaseTools:
     ) -> str:
         """Spans after the onset, slowest first: ids to cite, traces to open."""
         limit = max(1, min(limit, 50))
-        filters = [*_service_filter("serviceName", service), _window(self.onset_ms, "after")]
+        filters = [*_service_filter("serviceName", service), self._w("after")]
         if operation:
             filters.append({"term": {"operationName": operation}})
         if errors_only:

@@ -70,7 +70,9 @@ class AgentResult:
 
     def account(self, resp: LLMResponse) -> None:
         self.usage = self.usage + resp.usage
-        cost = cost_usd(resp.model, resp.usage.model_dump())
+        # A scripted control policy makes no API call: free, not an unknown price.
+        free = resp.model.startswith("policy:")
+        cost = 0.0 if free else cost_usd(resp.model, resp.usage.model_dump())
         self.cost_usd = None if cost is None or self.cost_usd is None else self.cost_usd + cost
         self.peak_request_tokens = max(self.peak_request_tokens, request_tokens(resp.usage))
         if resp.model not in self.models:

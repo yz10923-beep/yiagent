@@ -147,9 +147,12 @@ the binding to 0.0.0.0.
    cd ~/yiagent && git pull && uv sync && make verify && make es-up
    # plumbing on real data, near free (Haiku 5.5); its scores are not results
    uv run yi agent run --split dev_small --model claude-haiku-5-5 --variant smoke-haiku
+   # controls, before trusting any score: BARO on the same cases, the tool alone, placebo
+   uv run yi eval baseline baro --split dev_small
+   uv run yi agent run --split dev_small --model policy:metric-top --variant control-metric-top
+   uv run yi agent run --split dev_small --model claude-haiku-5-5 --placebo --variant placebo-haiku
    uv run yi agent run --split dev_small --limit 1      # one Sonnet 5.5 case: its real cost
    uv run yi agent run --split dev_small                # the rest (resumes; 3 cases at a time)
-   uv run yi eval baseline baro --split dev_small       # BARO on the same 24 cases, to compare
    uv run yi agent run --split dev_small                # again: prints the scores beside BARO's
    ```
 

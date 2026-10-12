@@ -158,11 +158,16 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   approved harness (hash unchanged by S3) and printed beside BARO.
 - Default model Sonnet 5.5 at effort high (Yi's call, 2026-10-12: half Opus 5.5's price;
   Opus is measured once as S4's model A/B instead of assumed). Haiku 5.5 for plumbing.
-- 498 unit + 17 Elasticsearch tests.
+- Controls (`agent/policies.py`, `--placebo`): a free scripted policy that answers with
+  the tool's ranking (no model), and a placebo that shows only pre-fault data.
+- First VM runs: Haiku 5.5 on dev_small AC@1 0.92 and 1.00 at $0.005/case; fault-type
+  F1 weak (RE2 0.35, RE3 0.00). Not trusted until BARO on dev_small, the metric-top
+  control and the placebo are in (ROADMAP "S3 status").
+- 501 unit + 20 Elasticsearch tests.
 
 Not done yet, in order:
-1. **S3 on the VM (Yi, paid):** a Haiku smoke run over dev_small, one Sonnet case, then
-   the rest; BARO on dev_small for the comparison (SETUP step 9). Then the S3 write-up.
+1. **S3 on the VM (Yi):** the three controls (BARO on dev_small, policy:metric-top,
+   Haiku placebo), then Sonnet 5.5 on dev_small (SETUP step 9). Then the S3 write-up.
 2. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)

@@ -15,6 +15,7 @@ from pathlib import Path
 from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import Elasticsearch
 
+from yi_agent.agent.policies import POLICIES
 from yi_agent.agent.runner import Condition, ConditionChanged, run_split
 from yi_agent.config import ConfigError, Settings, load_settings
 from yi_agent.data.alert import make_alert
@@ -34,6 +35,7 @@ from yi_agent.eval import run as eval_run
 from yi_agent.eval.grade import RunInvalid
 from yi_agent.eval.harness import HarnessNotApproved
 from yi_agent.llm.anthropic_provider import AnthropicProvider
+from yi_agent.llm.types import LLMProvider
 
 SPLITS = ("dev", "dev_small", "test", "all")
 # Development runs on Sonnet 5.5 (half Opus 5.5's price on every rate); the model
@@ -206,11 +208,14 @@ def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
-    cond = Condition(model=args.model, effort=args.effort, max_steps=args.max_steps)
-
+    cond = Condition(
+        model=args.model, effort=args.effort, max_steps=args.max_steps, placebo=args.placebo
+    )
     key = settings.anthropic_api_key
 
-    def provider() -> AnthropicProvider:
+    def provider() -> LLMProvider:
+        if cond.model in POLICIES:  # a scripted control: no API call
+            return POLICIES[cond.model]()
         return AnthropicProvider(
             model=cond.model,
             max_tokens=32_000,
@@ -311,11 +316,20 @@ def build_parser() -> argparse.ArgumentParser:
     c = ag.add_parser("run", help="run the agent on a split (resumable), then score it")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
     c.add_argument("--limit", type=int, help="only the first N cases (a smoke test; not scored)")
-    c.add_argument("--model", default=DEFAULT_MODEL)
+    c.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"a model id, or a scripted control: {', '.join(POLICIES)} (free)",
+    )
     c.add_argument("--effort", default="high", choices=("low", "medium", "high", "xhigh", "max"))
     c.add_argument("--max-steps", type=int, default=25, help="model calls per case")
     c.add_argument("--variant", default="agent", help="results directory: one condition each")
     c.add_argument("--parallel", type=int, default=3, help="cases investigated at once")
+    c.add_argument(
+        "--placebo",
+        action="store_true",
+        help="control: a false onset 6 min early, nothing visible from the real one on",
+    )
     c.set_defaults(fn=cmd_agent_run)
     return p
 

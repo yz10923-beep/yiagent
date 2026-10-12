@@ -365,8 +365,32 @@ ranked first, a delay's own time lands on the root cause in `trace_tree`, code f
 show in logs and error spans, a citation copied from tool output passes the grader's
 exists/holds checks, tools touch nothing but `search`, outputs carry no case name, path
 or secret, and a scripted investigator through the real runner over all 24 dev_small
-names scores, resumes, and refuses a changed condition. Next: Yi's first paid run (one
-case, then dev_small), compared with BARO per fault.
+names scores, resumes, and refuses a changed condition.
+
+First VM runs (2026-10-12), dev_small (24 cases):
+- The first Haiku 5.5 run crashed on a log line with no message (a tool bug: fixed, and
+  any crashing tool is now an infra failure for that case instead of the end of the run).
+- Haiku 5.5, two full runs: AC@1 **0.92** and **1.00**, Avg@5 0.95 / 1.00, 7 steps and 15
+  tool calls per case, **$0.005 per case** ($0.13 for all 24), 26 s per case, peak request
+  54K tokens. Citations exist 0.99-1.00, hold 0.95-0.97, on target 0.79-0.81. Fault-type
+  macro-F1 is weak: RE2 0.35, RE3 0.00 (socket and disk called cpu; code faults called
+  cpu, mem or the wrong f-number).
+- Sonnet 5.5, one case: 2 steps, $0.023, right (a 5.85e5-z disk jump; its summary says it
+  checked nothing else).
+- My cost estimate was 10-20x too high (I assumed long investigations at high effort).
+
+**Not a result yet.** Top-1 0.92-1.00 against BARO's 0.25 on dev is too large a jump to
+accept without controls, run before any paid Sonnet run:
+1. **BARO on dev_small**, the same 24 cases (dev's 0.25 is another set).
+2. **policy:metric-top**, free: the services of `metric_changes`' rows in order, no model.
+   The tool is BARO's statistic computed from Elasticsearch, where missing cells are
+   absent rather than zero-filled and a drop ranks like a rise. If this control scores
+   near the agent, the gain is the tool's, not the investigation's; that is still worth
+   knowing, and reporting.
+3. **Placebo** (`--placebo`): the alert says the anomaly began 6 minutes before the real
+   injection, and every query is cut off at the real one, so the agent sees only
+   pre-fault data. It should land near chance (Avg@5 0.19 here). Above chance means
+   something other than the fault points at the answer: a leak inside the case's data.
 
 ## Ideas for S2 from S1
 

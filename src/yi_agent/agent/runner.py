@@ -40,6 +40,12 @@ from yi_agent.llm.types import LLMProvider
 from yi_agent.trace.tracer import JsonlSpanWriter, Tracer
 
 LOOP_VERSION = 1  # bump when the loop's behaviour changes: it is part of the condition
+# The placebo control: the agent is told the anomaly began 6 minutes before the real
+# injection and can see nothing from the injection on (6 minutes on each side of the
+# false onset, all of it before the fault). If it still finds the root cause above
+# chance, something other than the fault's effect points at it.
+PLACEBO_SHIFT_MS = 6 * 60 * 1000
+PLACEBO_HALF_MS = 6 * 60 * 1000
 TOOLS_SHA = hashlib.sha256(json.dumps(TOOL_SPECS, sort_keys=True).encode()).hexdigest()[:12]
 
 type Progress = Callable[[str], None]
@@ -50,9 +56,10 @@ class Condition:
     model: str
     effort: str | None
     max_steps: int
+    placebo: bool = False
 
     def record(self) -> dict[str, Any]:
-        return {
+        rec: dict[str, Any] = {
             "model": self.model,
             "effort": self.effort,
             "max_steps": self.max_steps,
@@ -60,6 +67,9 @@ class Condition:
             "tools_sha": TOOLS_SHA,
             "loop_version": LOOP_VERSION,
         }
+        if self.placebo:  # only when set, so earlier run.json files still match
+            rec["placebo"] = {"shift_ms": PLACEBO_SHIFT_MS, "half_window_ms": PLACEBO_HALF_MS}
+        return rec
 
 
 class ConditionChanged(Exception):
@@ -130,7 +140,9 @@ async def run_split(
         label = labels[case_id]
         async with gate:
             say(f"[{n}/{len(chosen)}] {case_id} ...")
-            trial, traj = await _run_case(label, data_dir, es, make_provider, config, run_dir, say)
+            trial, traj = await _run_case(
+                label, data_dir, es, make_provider, config, run_dir, say, cond.placebo
+            )
         # One event loop: these writes never interleave, and each leaves a valid file.
         done[case_id] = trial
         with (run_dir / "trajectories.jsonl").open("a") as fh:
@@ -156,17 +168,24 @@ async def _run_case(
     config: AgentConfig,
     run_dir: Path,
     say: Progress,
+    placebo: bool = False,
 ) -> tuple[Trial, dict[str, Any]]:
     case_dir = data_dir / label.name
     window = read_window(case_dir)
     alert = make_alert(label, window)  # the case id, the system and the times; no label
+    indices = CaseIndices(es, label.id, window.sources)
+    tools = CaseTools(indices, window.onset_ms)
+    if placebo:
+        fake = window.onset_ms - PLACEBO_SHIFT_MS
+        alert = alert.model_copy(update={"onset_ms": fake, "end_ms": window.onset_ms})
+        indices = CaseIndices(es, label.id, window.sources, ceiling_ms=window.onset_ms)
+        tools = CaseTools(indices, fake, half_window_ms=PLACEBO_HALF_MS)
     result = AgentResult(case_id=label.id)
     try:
         try:
             await asyncio.to_thread(ensure_loaded, es, label.id, case_dir, say)
         except (LoadError, ApiError, TransportError) as e:
             raise InfraFailure(f"loading the case failed: {e}") from e
-        tools = CaseTools(CaseIndices(es, label.id, window.sources), window.onset_ms)
         tracer = Tracer(label.id, JsonlSpanWriter(run_dir / "traces" / f"{label.id}.jsonl"))
         result = await run_agent(make_provider(), alert, partial(dispatch, tools), config, tracer)
     except InfraFailure as e:

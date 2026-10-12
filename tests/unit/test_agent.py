@@ -220,3 +220,11 @@ def test_a_crashing_tool_is_an_infra_failure_not_the_end_of_the_run() -> None:
     tools = CaseTools(Broken(), onset_ms=0)  # type: ignore[arg-type]
     with pytest.raises(ToolInfraError, match="tool overview crashed: KeyError"):
         dispatch(tools, "overview", {})
+
+
+def test_a_condition_without_placebo_records_what_earlier_runs_recorded() -> None:
+    from yi_agent.agent.runner import Condition
+
+    plain = Condition(model="m", effort="high", max_steps=25).record()
+    assert set(plain) == {"model", "effort", "max_steps", "system_sha", "tools_sha", "loop_version"}
+    assert "placebo" in Condition(model="m", effort="high", max_steps=25, placebo=True).record()

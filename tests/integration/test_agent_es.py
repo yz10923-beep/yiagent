@@ -379,3 +379,46 @@ def test_real_data_oddities_null_messages_long_lines_spans_without_duration(
         assert "slowest" in dispatch(tools, "find_spans", {})
     finally:
         unload_case(es, label.id)
+
+
+def test_the_placebo_ceiling_hides_everything_from_the_real_onset_on(
+    es: Elasticsearch, tmp_path: Path
+) -> None:
+    label, _, case_dir = loaded(es, tmp_path, "re3ob_cartservice_f1_1")
+    w = read_window(case_dir)
+    fake = w.onset_ms - runner.PLACEBO_SHIFT_MS
+    blind = CaseTools(
+        CaseIndices(es, label.id, w.sources, ceiling_ms=w.onset_ms),
+        fake,
+        half_window_ms=runner.PLACEBO_HALF_MS,
+    )
+    try:
+        logs = dispatch(blind, "search_logs", {"window": "all", "limit": 50})
+        stamps = [int(x) for x in re.findall(r"at_ms=(\d+)", logs)]
+        assert stamps and max(stamps) < w.onset_ms
+        assert "NullPointerException" not in logs  # the fault's own line is after the onset
+        assert "no log lines match" == dispatch(blind, "search_logs", {"contains": "nullpointer"})
+        assert dispatch(blind, "find_spans", {"errors_only": True}) == "no spans match"
+        with pytest.raises(ToolError, match="no trace"):
+            dispatch(blind, "trace_tree", {"trace_id": "t000c"})  # starts at the real onset
+        assert "(0) / " in dispatch(blind, "overview", {})
+        assert "windows are 6 minutes" in dispatch(blind, "overview", {})
+    finally:
+        unload_case(es, label.id)
+
+
+async def test_the_metric_top_policy_is_a_free_control_through_the_real_loop(
+    es: Elasticsearch, tmp_path: Path
+) -> None:
+    from yi_agent.agent.policies import MetricTopPolicy
+
+    label, tools, case_dir = loaded(es, tmp_path, "re2tt_ts-order-service_cpu_1")
+    try:
+        alert = make_alert(label, read_window(case_dir))
+        r = await run_agent(MetricTopPolicy(), alert, partial(dispatch, tools))
+        assert r.outcome == "submitted" and r.report is not None
+        assert r.report.root_causes[0] == "ts-order-service" and r.report.fault_type == "cpu"
+        assert r.cost_usd == 0.0 and r.models == ["policy:metric-top"]
+        assert check(r.report.evidence[0], CaseData(case_dir)).holds
+    finally:
+        unload_case(es, label.id)
