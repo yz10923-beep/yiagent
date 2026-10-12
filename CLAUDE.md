@@ -87,8 +87,8 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S3 code done in the cloud container (2026-10-12); next: Yi's first paid
-run (one case, then dev_small), compared with BARO.**
+**Current stage: S3 closed (2026-10-12): on dev, Haiku 5.5 0.99 and Sonnet 5.5 1.00 top-1
+vs BARO 0.25, with a tool-only ablation (0.31) and a placebo (0.03). Next: S4, fault type.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -160,16 +160,19 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   Opus is measured once as S4's model A/B instead of assumed). Haiku 5.5 for plumbing.
 - Controls (`agent/policies.py`, `--placebo`): a free scripted policy that answers with
   the tool's ranking (no model), and a placebo that shows only pre-fault data.
-- First VM runs, dev_small (ROADMAP "S3 status"): Haiku 5.5 AC@1 0.92 and 1.00 at
-  $0.005/case, against BARO 0.17, the tool alone 0.21 and the Haiku placebo 0.21 (no
-  leak; Sock Shop's floor is a prior over its few business services). Fault type is
-  weak (F1 RE2 0.35, RE3 0.00). `yi agent compare` prints variants side by side.
-- 504 unit + 21 Elasticsearch tests.
+- **Result on dev, 77 cases** (ROADMAP "S3 result"): top-1 BARO 0.25, tool-only 0.31,
+  Haiku placebo 0.03, **Haiku 5.5 0.99 ($0.005/case), Sonnet 5.5 1.00 ($0.031/case)**.
+  Root-cause localization is saturated; fault type is not (F1 RE2 0.46, RE3 0.00, with
+  systematic confusions: socket -> cpu, code faults -> mem). `yi agent compare` prints
+  variants side by side.
+- 504 unit + 22 Elasticsearch tests, one of which runs the VM's commands through the CLI.
 
 Not done yet, in order:
-1. **S3 on the VM (Yi):** load dev (77 cases), then on dev: the tool-only control, Haiku,
-   the Haiku placebo and Sonnet 5.5; `yi agent compare`. Then the S3 write-up.
-2. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
+1. **S4: fault type and evidence**, as A/Bs on dev (top-1 no longer separates variants):
+   start from the confusion table in ROADMAP "S3 result". The test split is run once,
+   for the final agent.
+2. S5 OpenRCA Bank + deploy: see ROADMAP. OpenRCA is where root-cause accuracy can
+   still discriminate.
 
 ## Where this came from (decisions already made; don't re-litigate)
 
@@ -213,6 +216,12 @@ Not done yet, in order:
 - Yi runs everything that costs money or needs the VM (paid eval runs, the data
   download, Elasticsearch with real data). Give exact commands and say what to send
   back. Only Yi approves a harness hash; never pass an approval flag on Yi's behalf.
+- **Before handing Yi a VM command (rules from S3, where skipping them cost Yi hours):**
+  run that exact command through `yi` in the container first, on fixture data (the
+  CLI end-to-end test in `tests/integration/test_agent_es.py` is the pattern); never
+  pipe a long command through `tail`, `head` or anything else that hides progress; say
+  how long it should take, what "done" looks like, and how to tell a hang from slow work;
+  one block per step, with the expected output, before the next.
 - The cloud dev container: Hugging Face downloads are blocked (proxy 403); Docker works
   after `sudo dockerd &`; Elastic's image registry is blocked but Docker Hub is not
   (hence the `elasticsearch:9.1.0` image); its disk looks >90% used to ES, so disable

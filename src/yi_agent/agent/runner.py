@@ -117,7 +117,7 @@ async def run_split(
     limit: int | None = None,
     parallel: int = 1,
     progress: Progress | None = None,
-    results_dir: Path = RESULTS_DIR,
+    results_dir: Path | None = None,
 ) -> str:
     """Run (or resume) the agent on a split and return the printed summary. With
     `limit`, only the first cases run (a smoke test); scoring needs the whole split.
@@ -127,6 +127,7 @@ async def run_split(
     labels = eval_run.labels_by_id()
     ids = eval_run.split_ids(split, labels)
     chosen = ids[:limit] if limit else ids
+    results_dir = results_dir or RESULTS_DIR  # read at call time, so tests can redirect it
     run_dir = results_dir / variant / split
     _check_condition(run_dir, cond)
     trials_path = run_dir / "trials.jsonl"
@@ -275,7 +276,7 @@ def _versus_baro(run_dir: Path, baro_scores: Path) -> str:
 
 
 def compare(
-    split: str, variants: Sequence[str], group: str = "all", results_dir: Path = RESULTS_DIR
+    split: str, variants: Sequence[str], group: str = "all", results_dir: Path | None = None
 ) -> str:
     """One row per variant from its scores.json and trajectories (nothing re-run or
     re-graded): the S3 results table. A row graded by another harness is flagged."""
@@ -288,7 +289,7 @@ def compare(
     )
     lines = [f"{split}, group {group!r}", head, "-" * len(head)]
     for v in variants:
-        run_dir = results_dir / v / split
+        run_dir = (results_dir or RESULTS_DIR) / v / split
         path = run_dir / "scores.json"
         if not path.exists():
             lines.append(f"{v:<22}  (no scores.json: not run to the end, or not this split)")

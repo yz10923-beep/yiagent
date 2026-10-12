@@ -416,11 +416,43 @@ Chance Avg@5 is 0.19. Reading:
   faults are injected into, without evidence. That is a prior, not a leak, and it means
   uniform chance understates the null in a small system: **the placebo is the honest
   floor**, per system.
+- *Correction, from dev below:* the "Sock Shop prior" was noise from 6 cases. On dev's
+  18 Sock Shop cases the placebo is exactly at chance (Avg@5 0.27).
 - dev loaded (2026-10-12): all 77 cases complete and verified (52.3M documents, 206
   indices, cluster green), 53 of them in about 40 minutes. The load looked frozen only
   because its output went through `| tail -3`, which prints nothing until the end.
 - **Still to show:** the full dev split (77 cases; dev_small's intervals are wide),
   Sonnet 5.5, and the fault type, which no method gets (RE2 F1 0.35, RE3 0.00).
+
+### S3 result: dev, 77 cases (VM, 2026-10-12). S3 closed.
+
+| run | AC@1 (95% CI) | AC@3 | Avg@5 | F1 re2 | F1 re3 | on target | expected evidence | $/case | steps |
+|---|---|---|---|---|---|---|---|---|---|
+| BARO | 0.25 (0.16-0.35) | 0.87 | 0.74 | 0.22 | 0.00 | 0.25 | 0.14 | 0 | - |
+| policy:metric-top (tool, no model) | 0.31 (0.22-0.42) | 0.91 | 0.78 | 0.22 | 0.00 | 0.31 | 0.19 | 0 | 2.0 |
+| Haiku 5.5, placebo | 0.03 (0.01-0.09) | 0.14 | 0.11 | 0.18 | 0.00 | 0.04 | 0.01 | 0.014 | 14.9 |
+| **Haiku 5.5** | **0.99 (0.93-1.00)** | 1.00 | 1.00 | 0.44 | 0.00 | 0.85 | 0.70 | 0.0054 | 6.7 |
+| **Sonnet 5.5** | **1.00 (0.95-1.00)** | 1.00 | 1.00 | 0.46 | 0.00 | 0.90 | 0.65 | 0.031 | 3.7 |
+
+Chance Avg@5 0.18. Per system top-1, BARO / tool / Haiku / Sonnet: Online Boutique 0.17 /
+0.22 / 1.00 / 1.00, Sock Shop 0.06 / 0.17 / 1.00 / 1.00, Train Ticket 0.56 / 0.67 /
+0.94 / 1.00. The four runs cost $3.88 in all (Sonnet $2.40, 10 s per case). Haiku's one
+miss named the root cause's own database first (ts-order-mongo for ts-order-service).
+
+What it shows:
+- **Root-cause localization on RCAEval RE2/RE3 is solved by an LLM agent, and it is the
+  model's doing:** the same tool output read by a fixed rule scores 0.31; read by Haiku,
+  0.99. The placebo (only pre-fault data) falls to 0.03, at or below chance in every
+  system, so no leak in the case's data carries the answer.
+- **So top-1 no longer separates variants here; fault type and evidence still do.** S4
+  measures those. Fault-type confusions are systematic, not noise (Sonnet, dev):
+  socket -> cpu 9/9 (a socket stressor burns CPU, and the agent reads the larger move);
+  the RE3 code faults -> mem 17/23 and f-numbers swapped (deploying the faulty code
+  restarts the service, so memory moves at the onset); loss -> delay or mem 7/9. RE3
+  F1 is 0.00 for every method: no run names an f-number correctly.
+- Sonnet is more decisive (3.7 steps against Haiku's 6.7) and cites slightly better on
+  target (0.90 vs 0.85), at 6x the price. Both are cheap enough to run every dev A/B.
+- The test split stays untouched: it is run once, for the final agent, after S4.
 
 ## Ideas for S2 from S1
 
@@ -466,6 +498,24 @@ about 1.9x faster. Open: timed loads of dev_small on the VM, with disk use.
 ## Interview talking points
 
 (Filled in as each stage closes, with numbers.)
+
+**S3 (the agent).**
+- *The result:* on 77 held-out dev cases the agent names the root-cause service first in
+  99-100% of cases (Haiku 5.5 at half a cent a case, Sonnet 5.5 at 3 cents), against 25%
+  for BARO, RCAEval's classical baseline, on the same cases.
+- *Is the gain the model's? An ablation:* a fixed rule reading the same tool output
+  scores 31%. The tool is BARO's statistic; the model is what chooses the cause among the
+  services that moved (BARO had it in its top 3 in 87% of cases).
+- *Is it a leak? A placebo:* the same agent shown only pre-fault data, with a false onset,
+  scores 3% (chance 18% Avg@5). The two controls cost about $1 and answer the two
+  questions an interviewer should ask about a 0.25 -> 1.00 jump.
+- *What isn't solved:* fault type (macro-F1 0.46 on RE2, 0.00 on RE3), with systematic
+  confusions that have mechanical explanations (socket stress burns CPU; a code fault is
+  deployed by a restart that moves memory). That is the S4 target, and the honest
+  framing: localization on this benchmark is saturated; diagnosis is not.
+- *The loop is ~200 lines, no framework:* append-only history for caching, typed report
+  as the final tool call, API errors retried and classed as infra, a placebo enforced in
+  the one class every query passes through.
 
 **S2 (eval harness, before the agent).**
 - *Every grader has an oracle, a null and a wrong answer.* On the real dev split the

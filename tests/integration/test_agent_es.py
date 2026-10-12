@@ -440,3 +440,33 @@ async def test_compare_puts_variants_side_by_side_from_their_scores(
     row = next(line for line in table.splitlines() if line.startswith("top "))
     assert " 24 " in row and "0.0000" in row and "other harness" not in row
     assert "missing" in table and "no scores.json" in table
+
+
+def test_the_vm_commands_run_end_to_end_through_the_cli(
+    es: Elasticsearch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dev_small: tuple[Path, list[CaseLabel]],
+) -> None:
+    """Exactly the commands Yi runs, through `yi` itself: a wiring bug in the CLI once
+    reached the VM because the tests called the functions directly (2026-10-12)."""
+    from yi_agent import cli
+
+    data_dir, _ = dev_small
+    monkeypatch.setenv("YI_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(runner, "RESULTS_DIR", tmp_path / "results")
+    argv = ["agent", "run", "--split", "dev_small", "--model", "policy:metric-top"]
+    assert cli.main([*argv, "--variant", "top", "--limit", "2"]) == 0
+    assert "partial run: 2 of 24" in capsys.readouterr().out
+    assert cli.main([*argv, "--variant", "top"]) == 0
+    assert "AC@1" in capsys.readouterr().out
+    assert cli.main([*argv, "--variant", "blind", "--placebo"]) == 0
+    capsys.readouterr()
+    assert cli.main(["agent", "compare", "top", "blind", "--group", "all", "re2-tt"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\ntop ") == 2 and out.count("\nblind ") == 2  # two groups, two rows
+    assert "no scores.json" not in out
+    # a changed condition is refused with a message, not a traceback
+    assert cli.main([*argv, "--variant", "top", "--max-steps", "9"]) == 2
+    assert "pass a new --variant" in capsys.readouterr().err
