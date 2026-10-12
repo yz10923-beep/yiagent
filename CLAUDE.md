@@ -87,8 +87,7 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S2 on the VM (2026-10-12): BARO reproduces; next: Yi re-approves the
-harness and rescores the dev baselines, then S3 (the agent).**
+**Current stage: S2 closed (2026-10-12); next: S3 (the agent).**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -140,20 +139,18 @@ Done in S2 so far (decisions and the paper's facts in `docs/ROADMAP.md`):
 - `yi eval baseline|score|reproduce-baro|evidence-coverage|metric-kinds`. Selftest in
   `tests/unit/test_eval.py` (oracle 1.0, random at chance, empty and wrong 0, fabricated
   evidence caught). 483 unit + 8 Elasticsearch tests.
+- On the VM (ROADMAP "First VM run", "Re-approved run"): BARO reproduces the published
+  RE2-TT numbers (6/6 faults to two decimals) after a port fix (memory in MB); harness
+  `3dae88a0b1ad` approved by Yi; dev: oracle 1.00, random at chance, **BARO AC@1 0.25,
+  AC@3 0.87, Avg@5 0.74** (the bar), evidence coverage 74/77. **Recording order leaks the
+  label** (nearest injection in time: 90% top-1): nothing that crosses cases may carry
+  times, dates or case ids.
 
 Not done yet, in order:
-1. **S2 on the VM (Yi):** first run done (ROADMAP "First VM run"): oracle 1.00, random at
-   chance, coverage 74/77. **BARO now reproduces** the published RE2-TT numbers (6/6
-   faults equal to two decimals) after fixing a port bug (memory not converted to MB);
-   the Parquet is RCAEval's own `simple_metrics.csv`. Next: Yi re-approves the harness
-   (it changed since `6ad6f3dc`) and rescores the dev baselines; BARO's dev row is
-   provisional until then.
-   **Recording order leaks the label** (nearest injection in time: 90% top-1): nothing
-   that crosses cases may carry times, dates or case ids (ROADMAP).
-2. **S3, the agent:** the loop (~200 lines, Yi must be able to explain it), read-only
+1. **S3, the agent:** the loop (~200 lines, Yi must be able to explain it), read-only
    telemetry tools bound to one case id, the report above as its final tool call; first
    paid dev_small run, compared with BARO per fault.
-3. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
+2. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
 

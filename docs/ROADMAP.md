@@ -273,6 +273,41 @@ absolute times, dates or case ids, and any such feature is re-checked with the
 shape-time detector run through it.** Shifting every case to a common epoch would not
 close the channel, since log messages print their own dates.
 
+### Re-approved run (2026-10-12): S2 closed
+
+Yi reviewed the diff since d361773 (the memory fix, the missing-input check) and
+approved harness `3dae88a0b1ad...` (= commit 7474237, the same hash as in the cloud
+container) by scoring the oracle with `--approve-harness`. Dev, 77 cases:
+
+| baseline | AC@1 (95% CI) | AC@3 | Avg@5 | F1 re2 | F1 re3 | evidence on target | expected evidence |
+|---|---|---|---|---|---|---|---|
+| oracle | 1.00 (0.95-1.00) | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| random | 0.08 (0.04-0.16) | 0.21 | 0.22 | 0.07 | 0.20 | - | 0.00 |
+| **BARO (the bar)** | **0.25 (0.16-0.35)** | **0.87** | **0.74** | 0.22 | 0.00 | 0.25 | 0.14 |
+| shape-time (leak detector) | 0.90 (0.81-0.95) | 0.94 | 0.94 | - | - | - | - |
+| shape-columns (leak detector) | 0.68 (0.56-0.77) | 0.90 | 0.87 | - | - | - | - |
+
+BARO moved from the provisional 0.17 / 0.79 / 0.66 with the memory fix; oracle, random,
+the leak detectors and coverage (74/77) are unchanged, as expected.
+
+BARO per fault on dev (AC@1 / Avg@5): cpu 0.11 / 0.76, delay 0.00 / 0.33, disk 0.33 /
+0.87, loss 0.22 / 0.76, mem 0.78 / 0.93, socket 0.11 / 0.67; RE3 f1 0.25 / 0.85, f3 0.44
+/ 0.89, f4 0.00 / 0.71, f5 0.00 / 0.53. Per system AC@1: OB 0.17, SS 0.06, TT 0.56 (RE2).
+
+What this says about where the agent can win (S3's hypotheses, not results):
+- **Top-1, not top-3.** BARO has the root cause in its top 3 in 87% of cases but first
+  in 25%: a caller or a neighbour on the same node moves more. Separating cause from
+  symptom among a few candidates is what an investigation is for.
+- **Delay and loss.** BARO's worst faults (delay Avg@5 0.33): latency propagates up the
+  call graph, so every caller's latency rises too. Traces separate a span's own time from
+  its children's; metrics cannot.
+- **Fault type.** BARO names no RE3 fault (F1 0.00: f1-f5 are code faults visible only in
+  logs and error spans) and few RE2 ones (0.22).
+- **Evidence.** BARO's citations all exist and hold (its metrics really moved) but only
+  25% are on the root cause: "something moved" is not "the cause moved". The grader
+  scores the agent on the same three checks.
+- **Hard to beat:** mem (AC@1 0.78, Avg@5 0.93) and disk (Avg@5 0.87).
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case
@@ -317,6 +352,26 @@ about 1.9x faster. Open: timed loads of dev_small on the VM, with disk use.
 ## Interview talking points
 
 (Filled in as each stage closes, with numbers.)
+
+**S2 (eval harness, before the agent).**
+- *Every grader has an oracle, a null and a wrong answer.* On the real dev split the
+  oracle scores 1.00 everywhere and random lands at chance (Avg@5 0.22 against 0.18), so
+  a score means what it says before any agent runs. Fabricated log lines, spans and
+  metrics fail the grounding check in the selftest.
+- *Reproduce the baseline before using it as the bar.* Our BARO first missed the paper
+  by 0.12-0.30 on five of six faults. The misses' top scores (4096, 8192, 135168) were
+  multiples of a 4 KB memory page: the port skipped RCAEval's bytes-to-MB conversion on
+  the reasoning that robust z is unit-free, which fails exactly when a series is flat
+  before the onset (spread 0, scale 1, z = raw bytes). After the fix: six of six equal.
+  A second hypothesis (a different input file) was tested and ruled out the same day.
+- *Leak detectors as baselines.* A "model" that predicts the service of the nearest
+  other injection in time scores 0.90 top-1: the benchmark was recorded one service at a
+  time. A per-case agent can't use it, but any memory across cases could, so the rule
+  became: nothing that crosses cases carries times, dates or case ids.
+- *The bar, honestly stated:* BARO on dev is AC@1 0.25, AC@3 0.87, Avg@5 0.74. Beating
+  its top-3 will be hard; its top-1, delay and fault type are the openings.
+- *A lock on the harness.* Scores are refused unless the hash of the graders, labels and
+  split matches the one Yi approved; every scores.json records it.
 
 **S1 (data).**
 - *The labels are in the file names.* RCAEval's case directories are named
