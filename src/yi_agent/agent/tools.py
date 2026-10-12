@@ -90,6 +90,19 @@ def _service_filter(field: str, service: str | None) -> list[dict[str, Any]]:
     ]
 
 
+LONG_LINE: dict[str, Any] = {
+    "bool": {
+        "filter": [{"exists": {"field": "message"}}],
+        "must_not": [{"exists": {"field": "message.raw"}}],
+    }
+}
+
+
+def _us(span: dict[str, Any]) -> float:
+    """A span's duration in microseconds; 0 when the source has none."""
+    return float(span.get("duration") or 0)
+
+
 def _escape_wildcard(s: str) -> str:
     return s.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
 
@@ -326,7 +339,8 @@ class CaseTools:
                         }
                     },
                 },
-                "long": {"missing": {"field": "message.raw"}},
+                # lines too long for the keyword field (it keeps 2048 chars): not grouped
+                "long": {"filter": LONG_LINE},
             },
         )
         total = r["hits"]["total"]["value"]
@@ -361,7 +375,7 @@ class CaseTools:
             at = int(hit["@timestamp"])
             b = f" [{before.get(g['key'], 0)}]" if window == "after" else ""
             out.append(
-                f"{g['doc_count']}{b} | {hit['container_name']}, at_ms={at} "
+                f"{g['doc_count']}{b} | {hit.get('container_name')}, at_ms={at} "
                 f"({_rel(at, self.onset_ms)}) | {_clip(g['key'])}"
             )
         if n_long := aggs["long"]["doc_count"]:
@@ -371,8 +385,7 @@ class CaseTools:
                 query={
                     "bool": {
                         "must": must,
-                        "filter": [*q["bool"]["filter"]],
-                        "must_not": [{"exists": {"field": "message.raw"}}],
+                        "filter": [*q["bool"]["filter"], LONG_LINE],
                     }
                 },
                 sort=[{"@timestamp": "asc"}],
@@ -383,8 +396,8 @@ class CaseTools:
                 s = h["_source"]
                 at = int(s["@timestamp"])
                 out.append(
-                    f"1 | {s['container_name']}, at_ms={at} ({_rel(at, self.onset_ms)}) | "
-                    f"{_clip(s['message'], 600)}"
+                    f"1 | {s.get('container_name')}, at_ms={at} ({_rel(at, self.onset_ms)}) | "
+                    f"{_clip(str(s.get('message', '')), 600)}"
                 )
         return "\n".join(out)
 
@@ -500,8 +513,8 @@ class CaseTools:
         for h in hits:
             s = h["_source"]
             out.append(
-                f"{s['spanID']} | {s['traceID']} | {s['serviceName']} | "
-                f"{_clip(str(s.get('operationName')), 60)} | {_num(s['duration'] / 1000)} | "
+                f"{s.get('spanID')} | {s.get('traceID')} | {s.get('serviceName')} | "
+                f"{_clip(str(s.get('operationName')), 60)} | {_num(_us(s) / 1000)} | "
                 f"{s.get('statusCode')} | {_rel(int(s['@timestamp']), self.onset_ms)}"
             )
         return "\n".join(out)
@@ -527,7 +540,7 @@ class CaseTools:
         spans = [h["_source"] for h in r["hits"]["hits"]]
         if not spans:
             raise ToolError(f"no trace {trace_id!r}")
-        by_id = {s["spanID"]: s for s in spans}
+        by_id = {s["spanID"]: s for s in spans if s.get("spanID")}
         kids: dict[str | None, list[dict[str, Any]]] = {}
         for s in spans:
             parent = s.get("parentSpanID")
@@ -540,12 +553,12 @@ class CaseTools:
         def walk(s: dict[str, Any], depth: int) -> None:
             if len(out) > 120:
                 return
-            children = kids.get(s["spanID"], [])
-            own = s["duration"] - sum(c["duration"] for c in children)
+            children = kids.get(s.get("spanID"), []) if s.get("spanID") else []
+            own = _us(s) - sum(_us(c) for c in children)
             op = _clip(str(s.get("operationName")), 60)
             out.append(
-                f"{'  ' * depth}{s['spanID']} {s['serviceName']} {op}: "
-                f"{_num(s['duration'] / 1000)} ({_num(max(own, 0) / 1000)}) {s.get('statusCode')}"
+                f"{'  ' * depth}{s.get('spanID')} {s.get('serviceName')} {op}: "
+                f"{_num(_us(s) / 1000)} ({_num(max(own, 0) / 1000)}) {s.get('statusCode')}"
             )
             for c in children:
                 walk(c, depth + 1)
@@ -700,7 +713,14 @@ def dispatch(tools: CaseTools, name: str, args: dict[str, Any]) -> str:
         inspect.signature(fn).bind(**args)
     except TypeError as e:  # wrong or missing arguments
         raise ToolError(f"bad arguments for {name}: {e}") from e
-    text = fn(**args)
+    try:
+        text = fn(**args)
+    except (ToolError, ToolInfraError):
+        raise
+    except Exception as e:
+        # A bug in a tool is ours, not the agent's: the case becomes an infra failure (not
+        # scored, retried on resume once fixed) instead of ending the whole run.
+        raise ToolInfraError(f"tool {name} crashed: {type(e).__name__}: {e}") from e
     if len(text) > MAX_CHARS:
         cut = text[:MAX_CHARS].rsplit("\n", 1)[0]
         text = cut + f"\n[... cut at {MAX_CHARS} chars: filter or lower the limit]"

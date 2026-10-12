@@ -333,3 +333,49 @@ async def test_a_split_run_scores_resumes_and_keeps_one_condition(
     assert len(made) == 24  # all done: nothing runs, the summary is printed again
     with pytest.raises(ConditionChanged, match="max_steps"):
         await run(Condition(model="claude-sonnet-5-5", effort="high", max_steps=9))
+
+
+def test_real_data_oddities_null_messages_long_lines_spans_without_duration(
+    es: Elasticsearch, tmp_path: Path
+) -> None:
+    """The VM's first Haiku run crashed on a log line with no message (2026-10-12)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from tests.rcaeval_fixture import ONSET_S
+
+    name = "re2ob_cartservice_loss_1"
+    label = parse_case_name(name)
+    case_dir = make_case(tmp_path, name)
+    long_line = "java.lang.IllegalStateException: boom " + "x" * 3000
+    pq.write_table(
+        pa.table(
+            {
+                "timestamp": pa.array([ONSET_S + i for i in range(4)], pa.int64()),
+                "container_name": ["cartservice", None, "cartservice", "frontend"],
+                "message": [None, "orphan line without a container", long_line, ""],
+            }
+        ),
+        case_dir / "logs.parquet",
+    )
+    traces = pq.read_table(case_dir / "traces.parquet")
+    traces = traces.set_column(
+        traces.schema.get_field_index("duration"),
+        "duration",
+        pa.array([None, 900, None], pa.int64()),
+    )
+    pq.write_table(traces, case_dir / "traces.parquet")
+    load_case(es, label.id, case_dir)
+    w = read_window(case_dir)
+    tools = CaseTools(CaseIndices(es, label.id, w.sources), w.onset_ms)
+    try:
+        text = dispatch(tools, "search_logs", {"window": "all"})
+        assert "1 lines over 2048 chars are not grouped" in text
+        c = log_citation(text.split("not grouped")[1])
+        assert c is not None and c.excerpt.startswith("java.lang.IllegalStateExc")
+        assert check(c, CaseData(case_dir)).exists
+        assert "orphan line" in text  # a line without a container is still shown
+        assert "trace " in dispatch(tools, "trace_tree", {"trace_id": "0001"})
+        assert "slowest" in dispatch(tools, "find_spans", {})
+    finally:
+        unload_case(es, label.id)

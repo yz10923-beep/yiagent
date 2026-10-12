@@ -206,3 +206,17 @@ def test_the_prompt_and_tools_name_no_service_and_no_case() -> None:
     }
     assert found == set()
     assert "re2" not in blob.lower() and "re3" not in blob.lower()  # not even the suite
+
+
+def test_a_crashing_tool_is_an_infra_failure_not_the_end_of_the_run() -> None:
+    from yi_agent.agent.tools import CaseTools, dispatch
+
+    class Broken:
+        sources = ("metrics",)
+
+        def search(self, kind: str, **body: Any) -> dict[str, Any]:
+            raise KeyError("message")
+
+    tools = CaseTools(Broken(), onset_ms=0)  # type: ignore[arg-type]
+    with pytest.raises(ToolInfraError, match="tool overview crashed: KeyError"):
+        dispatch(tools, "overview", {})
