@@ -25,6 +25,7 @@ from pathlib import Path
 ZENODO = "https://zenodo.org/records/14590730/files/{name}.zip?download=1"
 BLOCK = 1 << 20
 RETRIES = 5
+TIMEOUT_S = 30  # per socket read: a stalled transfer fails fast and is retried
 
 
 class HttpRangeFile(io.RawIOBase):
@@ -41,17 +42,20 @@ class HttpRangeFile(io.RawIOBase):
 
     def _get(self, start: int, end: int) -> bytes:
         for attempt in range(RETRIES):
+            why = "short read"
             try:
                 req = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{end}"})
-                with urllib.request.urlopen(req, timeout=120) as r:
+                with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
                     if r.status != 206:
                         raise SystemExit(f"server ignored the Range header (HTTP {r.status})")
                     data: bytes = r.read()
                 if len(data) == end - start + 1:
                     return data
-            except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, OSError):
-                pass
-            time.sleep(2**attempt)  # a dropped connection is common on large archives
+            except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, OSError) as e:
+                why = repr(e)  # HTTP 429 (Zenodo's rate limit) is a URLError too
+            wait = 2 ** (attempt + 2)  # a dropped connection is common on large archives
+            print(f"  bytes {start}-{end}: {why}; retry in {wait}s", file=sys.stderr, flush=True)
+            time.sleep(wait)
         raise SystemExit(f"bytes {start}-{end}: failed {RETRIES} times")
 
     def _block(self, i: int) -> bytes:
@@ -59,6 +63,8 @@ class HttpRangeFile(io.RawIOBase):
             start, end = i * BLOCK, min((i + 1) * BLOCK, self.size) - 1
             self.blocks[i] = self._get(start, end)
             self.fetched += len(self.blocks[i])
+            if self.fetched // (8 * BLOCK) != (self.fetched - len(self.blocks[i])) // (8 * BLOCK):
+                print(f"  {self.fetched / 1e6:.0f} MB fetched", file=sys.stderr, flush=True)
             if len(self.blocks) > 64:  # members are read front to back: keep memory bounded
                 self.blocks.pop(next(iter(self.blocks)))
         return self.blocks[i]
@@ -144,7 +150,10 @@ def compare(label: str, csv_text: str, parquet_path: Path) -> None:
                 diff += 1
                 if len(examples) < 3:
                     examples.append(f"{c} at {r[t_idx]}: csv {a} vs parquet {b}")
-    print(f"    values (60 shared columns x 300 rows): {same} equal, {diff} differ, {unmatched} unmatched")
+    print(
+        f"    values (60 shared columns x 300 rows): {same} equal, {diff} differ, "
+        f"{unmatched} unmatched"
+    )
     for e in examples:
         print(f"      e.g. {e}")
 
@@ -160,7 +169,7 @@ def peek(dataset: str, case_dir: str, rep: str) -> None:
     print(f"zip {f.size / 1e9:.1f} GB; {prefix}:")
     for m in z.namelist():
         if m.startswith(prefix) and not m.endswith("/"):
-            print(f"  {m[len(prefix):]:<24} {z.getinfo(m).file_size:>12,} bytes")
+            print(f"  {m[len(prefix) :]:<24} {z.getinfo(m).file_size:>12,} bytes")
     parquet = load_settings().data_dir / case_name(dataset, case_dir, rep) / "metrics.parquet"
     for member in ("simple_metrics.csv", "metrics.csv"):
         if prefix + member in z.namelist():
@@ -174,13 +183,16 @@ def extract(dataset: str, member: str, out: Path) -> None:
     found = cases(z)
     for n, ((case_dir, rep), prefix) in enumerate(sorted(found.items()), 1):
         dest = out / case_name(dataset, case_dir, rep)
-        if (dest / member).is_file():
-            continue  # resumable
-        dest.mkdir(parents=True, exist_ok=True)
-        for name in (member, "inject_time.txt"):
+        names = (member, "inject_time.txt")
+        if all((dest / name).is_file() for name in names):
+            continue  # resumable: a case counts as done only with both files
+        data = {}
+        for name in names:
             with z.open(prefix + name) as src:
-                data = src.read()
-            (dest / (name + ".part")).write_bytes(data)
+                data[name] = src.read()
+        dest.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (dest / (name + ".part")).write_bytes(data[name])
             (dest / (name + ".part")).rename(dest / name)
         print(f"[{n}/{len(found)}] {dest.name}  ({f.fetched / 1e6:.0f} MB fetched)", flush=True)
     print(f"done: {len(found)} cases under {out}")

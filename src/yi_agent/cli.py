@@ -294,6 +294,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except RunInvalid as e:
         print(f"run is invalid, not scored: {e}", file=sys.stderr)
         return 2
+    except FileNotFoundError as e:
+        print(f"missing input: {e}", file=sys.stderr)
+        return 2
     return rc
 
 

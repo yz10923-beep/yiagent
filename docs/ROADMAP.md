@@ -228,7 +228,7 @@ families on the VM: cpu, mem, diskio, socket, workload, error, latency-50, laten
 74 of 77 dev cases (missing: 2 re2-ob delay, 1 re2-ob loss: the root cause's latency did
 not move by a robust z of 3).
 
-**Finding 1: BARO does not reproduce yet.** RE2-TT, all 90 cases, Avg@5 ours vs
+**Finding 1 (resolved below): BARO did not reproduce at first.** RE2-TT, all 90 cases, Avg@5 ours vs
 published: cpu 0.56 vs 0.72, mem 0.87 vs 0.99, disk 1.00 vs 1.00, socket 0.53 vs 0.83,
 delay 0.49 vs 0.63, loss 0.45 vs 0.64. The port follows RCAEval's code step by step, so
 the leading suspect is the input: `main.py` reads each case's `data.csv` from the Zenodo
@@ -246,14 +246,21 @@ Diagnosis (VM, 2026-10-12):
   (`convert_mem_mb`), which the port skipped on the reasoning that robust z is unit-free:
   true, except exactly in the zero-spread case. Fixed in `prepare_columns`, so grounding
   (a "mem went up" citation) uses MB too; regression test in `tests/unit/test_eval.py`.
-- **The input differs.** The Zenodo RE2 cases have no `data.csv`, so `main.py` reads
-  `simple_metrics.csv` (6 MB against the full `metrics.csv` at 27 MB in
-  ts-order-service_cpu_1): the published numbers use a subset of the metrics. Excluding
-  `workload` and `error` changed nothing, so it is not those two families.
-- Next: re-run on our Parquet with the fix, and run the port on RCAEval's own input
-  (`zenodo_peek.py extract RE2-TT simple_metrics.csv`, then `reproduce-baro --data-dir
-  ... --metrics-file simple_metrics.csv`). Matching there proves the port; any gap left
-  on our Parquet is then the input, and BARO is reported on both.
+- **The input was not it.** The Zenodo RE2 cases have no `data.csv`, so `main.py` reads
+  `simple_metrics.csv` (6 MB; the full `metrics.csv` is 27 MB). We suspected the Parquet
+  was the full metrics, but `zenodo_peek.py peek RE2-TT ts-order-service_cpu 1` showed the
+  Hugging Face Parquet *is* `simple_metrics.csv`: the same 358 columns (cpu, mem, diskio,
+  socket, workload, latency-50, latency-90) and 17,497 of 17,497 compared values equal.
+- **Result: BARO reproduces.** With the memory fix, on our Parquet, RE2-TT, all 90 cases,
+  Avg@5 ours vs published: cpu 0.72 vs 0.72, mem 0.99 vs 0.99, disk 1.00 vs 1.00, socket
+  0.83 vs 0.83, delay 0.63 vs 0.63, loss 0.64 vs 0.64. Six of six equal to two decimals,
+  so the port is faithful and one bug was the whole gap. The CSV route (`zenodo_peek.py
+  extract`, `reproduce-baro --metrics-file`) was not needed; it stays for other datasets.
+  (Its first VM run hung silently on Zenodo; it now times out reads after 30 s, retries
+  visibly, and writes a case only once both files are in.)
+- Interview point: the bug was found by reading BARO's misses, not by re-reading the code.
+  The scores (4096, 8192, 135168) were multiples of a memory page, which pointed straight
+  at units. "Scale-free" arguments break exactly at their degenerate cases.
 
 **Finding 2: the recording order leaks the label.** Predicting a case's root cause as the
 service of the nearest *other* injection in time is right 90% of the time on dev (chance

@@ -110,6 +110,16 @@ def reproduce_baro(
     `metrics_file` (e.g. simple_metrics.csv, extracted from the Zenodo zips by
     scripts/zenodo_peek.py into data_dir/<case>/) runs the port on RCAEval's own input."""
     labels = [c for c in labels_by_id().values() if c.suite == "re2" and c.system in systems]
+    if metrics_file is not None:
+        need = (metrics_file.name, "inject_time.txt")
+        missing = [
+            c.name for c in labels if not all((data_dir / c.name / f).is_file() for f in need)
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} of {len(labels)} cases lack {' or '.join(need)} under {data_dir} "
+                f"(first: {missing[0]}); finish `scripts/zenodo_peek.py extract` first"
+            )
     per: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     misses: list[str] = []
     for n, c in enumerate(sorted(labels, key=lambda c: c.name), 1):

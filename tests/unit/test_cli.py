@@ -31,3 +31,15 @@ def test_an_incomplete_run_is_invalid_with_a_message(
     write_trials([Trial(case_id="cdeadbeef00", status="infra_error", error="x")], trials)
     assert cli.main(["eval", "score", str(trials), "--split", "dev_small"]) == 2
     assert "run is invalid, not scored" in capsys.readouterr().err
+
+
+def test_reproducing_on_a_half_extracted_input_names_the_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An interrupted extract left a case directory without inject_time.txt (VM, 2026-10-12).
+    (tmp_path / "re2tt_ts-auth-service_cpu_1").mkdir()
+    argv = ["eval", "reproduce-baro", "--data-dir", str(tmp_path)]
+    assert cli.main([*argv, "--metrics-file", "simple_metrics.csv"]) == 2
+    err = capsys.readouterr().err
+    assert "90 of 90 cases lack simple_metrics.csv or inject_time.txt" in err
+    assert "Traceback" not in err
