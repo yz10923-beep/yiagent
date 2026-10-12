@@ -129,21 +129,43 @@ def make_fault_case(data_dir: Path, name: str, services: list[str]) -> Path:
         )
     pq.write_table(pa.table(log_rows), d / "logs.parquet")
     spans: dict[str, list[object]] = {
-        k: [] for k in ("time", "spanID", "serviceName", "startTime", "statusCode")
+        k: []
+        for k in (
+            "time",
+            "traceID",
+            "spanID",
+            "parentSpanID",
+            "serviceName",
+            "operationName",
+            "startTime",
+            "duration",
+            "statusCode",
+        )
     }
+    # One trace per step: services[0] calls services[1] calls ... Each span spends 1 ms
+    # itself; with a delay the root cause spends 200 ms more, and every caller waits.
     for i, t in enumerate(range(ONSET_S - 60, ONSET_S + 60, 5)):
+        own = [
+            1000 + (200_000 if s == rc and fault == "delay" and t >= ONSET_S else 0)
+            for s in services
+        ]
         for j, s in enumerate(services):
             erroring = s == rc and t >= ONSET_S and (fault == "loss" or code_level)
             spans["time"].append("12:02")
+            spans["traceID"].append(f"t{i:04x}")
             spans["spanID"].append(f"{i:04x}{j:04x}")
+            spans["parentSpanID"].append(f"{i:04x}{j - 1:04x}" if j else None)
             spans["serviceName"].append(s)
-            spans["startTime"].append(t * 1_000_000)
+            spans["operationName"].append(f"{s}/Handle")
+            spans["startTime"].append(t * 1_000_000 + j * 100)
+            spans["duration"].append(sum(own[j:]))
             spans["statusCode"].append(500 if erroring else 200)
     pq.write_table(
         pa.table(
             {
                 **spans,
                 "startTime": pa.array(spans["startTime"], pa.int64()),
+                "duration": pa.array(spans["duration"], pa.int64()),
                 "statusCode": pa.array(spans["statusCode"], pa.int64()),
             }
         ),

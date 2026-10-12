@@ -1,9 +1,11 @@
-"""`yi`: the command line. `yi data ...` (S1: fetch, check, inspect, audit, load, unload) and
-`yi eval ...` (S2: baseline, score, reproduce-baro, evidence-coverage, metric-kinds)."""
+"""`yi`: the command line. `yi data ...` (S1: fetch, check, inspect, audit, load, unload),
+`yi eval ...` (S2: baseline, score, reproduce-baro, evidence-coverage, metric-kinds) and
+`yi agent run` (S3)."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 import sys
 from collections import Counter
@@ -13,6 +15,7 @@ from pathlib import Path
 from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import Elasticsearch
 
+from yi_agent.agent.runner import Condition, ConditionChanged, run_split
 from yi_agent.config import ConfigError, Settings, load_settings
 from yi_agent.data.alert import make_alert
 from yi_agent.data.check import AuditResult, audit_case, check_download, inspect_case
@@ -30,8 +33,10 @@ from yi_agent.eval import baselines
 from yi_agent.eval import run as eval_run
 from yi_agent.eval.grade import RunInvalid
 from yi_agent.eval.harness import HarnessNotApproved
+from yi_agent.llm.anthropic_provider import AnthropicProvider
 
 SPLITS = ("dev", "dev_small", "test", "all")
+DEFAULT_MODEL = "claude-opus-5-5"
 
 
 def _labels() -> dict[str, CaseLabel]:
@@ -198,6 +203,36 @@ def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
+    cond = Condition(model=args.model, effort=args.effort, max_steps=args.max_steps)
+
+    key = settings.anthropic_api_key
+
+    def provider() -> AnthropicProvider:
+        return AnthropicProvider(
+            model=cond.model,
+            max_tokens=32_000,
+            effort=cond.effort,
+            api_key=key.get_secret_value() if key else None,
+        )
+
+    summary = asyncio.run(
+        run_split(
+            args.split,
+            settings.data_dir,
+            _es(settings),
+            provider,
+            cond,
+            args.variant,
+            limit=args.limit,
+            parallel=args.parallel,
+            progress=_progress,
+        )
+    )
+    print(summary)
+    return 0
+
+
 def cmd_unload(settings: Settings, args: argparse.Namespace) -> int:
     es = _es(settings)
     for i in args.ids:
@@ -267,6 +302,19 @@ def build_parser() -> argparse.ArgumentParser:
     c = ev.add_parser("metric-kinds", help="metric families each system exports")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
     c.set_defaults(fn=cmd_eval_metric_kinds)
+
+    ag = sub.add_parser("agent", help="the agent (costs money)").add_subparsers(
+        dest="cmd", required=True
+    )
+    c = ag.add_parser("run", help="run the agent on a split (resumable), then score it")
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
+    c.add_argument("--limit", type=int, help="only the first N cases (a smoke test; not scored)")
+    c.add_argument("--model", default=DEFAULT_MODEL)
+    c.add_argument("--effort", default="high", choices=("low", "medium", "high", "xhigh", "max"))
+    c.add_argument("--max-steps", type=int, default=25, help="model calls per case")
+    c.add_argument("--variant", default="agent", help="results directory: one condition each")
+    c.add_argument("--parallel", type=int, default=3, help="cases investigated at once")
+    c.set_defaults(fn=cmd_agent_run)
     return p
 
 
@@ -293,6 +341,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     except RunInvalid as e:
         print(f"run is invalid, not scored: {e}", file=sys.stderr)
+        return 2
+    except ConditionChanged as e:
+        print(str(e), file=sys.stderr)
         return 2
     except FileNotFoundError as e:
         print(f"missing input: {e}", file=sys.stderr)

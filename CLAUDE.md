@@ -87,7 +87,8 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S2 closed (2026-10-12); next: S3 (the agent).**
+**Current stage: S3 code done in the cloud container (2026-10-12); next: Yi's first paid
+run (one case, then dev_small), compared with BARO.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -146,10 +147,20 @@ Done in S2 so far (decisions and the paper's facts in `docs/ROADMAP.md`):
   label** (nearest injection in time: 90% top-1): nothing that crosses cases may carry
   times, dates or case ids.
 
+Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
+- The loop (`agent/loop.py`, ~200 lines): append-only history, ends on a valid
+  `submit_report`, a refusal, a nudge ignored, or the step budget; API errors retried,
+  then infra; Elasticsearch errors infra; bad tool calls go back to the model.
+- Seven read-only tools + submit (`agent/tools.py`), bound to one case id, search only;
+  the prompt (`agent/prompt.py`) is the same for every case and names no service.
+- The runner (`agent/runner.py`, `yi agent run`): one condition per results directory,
+  resumable, N cases at once, trajectories + transcripts + spans per case, scored by the
+  approved harness (hash unchanged by S3) and printed beside BARO.
+- 497 unit + 17 Elasticsearch tests.
+
 Not done yet, in order:
-1. **S3, the agent:** the loop (~200 lines, Yi must be able to explain it), read-only
-   telemetry tools bound to one case id, the report above as its final tool call; first
-   paid dev_small run, compared with BARO per fault.
+1. **S3 on the VM (Yi, paid):** `yi agent run --split dev_small --limit 1`, then the
+   rest; BARO on dev_small for the comparison (SETUP step 9). Then the S3 write-up.
 2. S4 A/B improvements, S5 OpenRCA Bank + deploy: see ROADMAP.
 
 ## Where this came from (decisions already made; don't re-litigate)
@@ -216,6 +227,7 @@ make es-test             # Elasticsearch integration tests (marker `es`)
 make live                # real-API tests (needs ANTHROPIC_API_KEY; costs money)
 uv run yi data --help    # fetch, check, inspect, audit, load, unload (data commands run on the VM)
 uv run yi eval --help    # baseline, score, reproduce-baro, evidence-coverage, metric-kinds
+uv run yi agent run --help  # the agent over a split (VM; costs money)
 ```
 
 Settings (`config.load_settings()`): `~/.yi/.env`, then `./.env`, then env vars (later
@@ -231,7 +243,9 @@ src/yi_agent/
   config.py   settings: ~/.yi/.env -> ./.env -> env vars                           (from kama)
   context.py  ContextMeter: request sizes exact from usage, the tail estimated     (vendored)
   outputs.py  OutputStore and cut(): results over the cap saved whole              (vendored)
-  cli.py      `yi data ...`
+  cli.py      `yi data ...`, `yi eval ...`, `yi agent run`
+  agent/      loop (the ~200 lines), tools (read-only, one case), prompt, runner (split ->
+              trials, resumable, one condition per variant)
   data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
               es_load (fresh indices per case, counts verified), alert, check (VM audits)
   eval/       report (the agent's output format), scoring, grade, grounding, case_data

@@ -308,6 +308,56 @@ What this says about where the agent can win (S3's hypotheses, not results):
   scores the agent on the same three checks.
 - **Hard to beat:** mem (AC@1 0.78, Avg@5 0.93) and disk (Avg@5 0.87).
 
+## S3 decisions (made 2026-10-12)
+
+- **The loop is ours, ~200 lines** (`agent/loop.py`): the Messages API's own message
+  format, appended to and never edited, so every step extends the cached prefix and
+  thinking blocks go back exactly as they came. It ends on a valid `submit_report` call
+  (the S2 `Report`, validated; an invalid one goes back to the model as a tool error), a
+  refusal, a second turn without a tool call (one nudge first), or the step budget (25
+  model calls by default; warned with 2 left). No framework, no tool runner: the stop
+  rules and failure classes are the part to explain.
+- **Failure classes.** API errors are retried with backoff (`llm/retry.py`); past the
+  policy, and any Elasticsearch failure, the trial is an infra error (never scored, retried
+  on resume). A bad tool call (unknown metric, bad argument) is the model's to fix: it
+  sees the message. A run that ends without a report is the agent's failure and scores
+  as an empty report.
+- **Seven read-only tools plus submit** (`agent/tools.py`), bound to one case id; the
+  client wrapper only searches. `overview`; `metric_changes` (each metric scored as BARO
+  scores it, memory in MB, approximate percentiles from Elasticsearch: the same signal
+  the baseline has, so a gain must come from the investigation); `metric_series`;
+  `search_logs` (lines grouped by exact text with their count before the onset; full
+  text plus a substring match, since `java.lang.NullPointerException` is one token to
+  the analyzer); `trace_stats` (p50/p90 and errors per operation, before -> after);
+  `find_spans`; `trace_tree` (own time per span = duration minus children's: where a slow
+  request spent its time). Outputs are text tables capped at 8,000 characters, and print
+  every citable value exactly as the grader looks it up.
+- **The prompt** (`agent/prompt.py`) is identical for every case and names no service,
+  case or suite (tested); it describes the 11 fault types as the paper injects them. The
+  agent is not told the suite (RE2 or RE3), so it chooses among all 11; BARO's fault
+  guess is given the suite. The case enters only through the alert.
+- **Default model `claude-opus-5-5` at effort high**, with the API's refusal fallback on
+  (`fallbacks: "default"`; a fallback's tokens are priced at the model that served
+  them). Model, effort and step budget are flags; each combination is its own variant.
+- **One condition per results directory** (`run.json`: model, effort, step budget,
+  prompt and tool-table hashes, loop version); a mismatch stops the run. The harness hash
+  is unchanged by S3 (the agent lives outside the hashed files), and an unapproved
+  harness stops a run before it spends anything.
+- **Recorded per case:** trajectory (outcome, steps, tool calls and errors, tokens,
+  dollars, peak request size, serving models, wall time), the full transcript, spans.
+
+## S3 status
+
+Built and tested in the cloud container (2026-10-12): 14 loop tests with a scripted
+model (ends, nudge, budget warning, retries, infra classes, append-only history, the
+prompt names no service); 9 Elasticsearch tests on planted cases: the planted metric is
+ranked first, a delay's own time lands on the root cause in `trace_tree`, code faults
+show in logs and error spans, a citation copied from tool output passes the grader's
+exists/holds checks, tools touch nothing but `search`, outputs carry no case name, path
+or secret, and a scripted investigator through the real runner over all 24 dev_small
+names scores, resumes, and refuses a changed condition. Next: Yi's first paid run (one
+case, then dev_small), compared with BARO per fault.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case

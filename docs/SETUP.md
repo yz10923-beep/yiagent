@@ -139,6 +139,23 @@ the binding to 0.0.0.0.
    Send the hash so it is committed with the code it approves; before the next `git pull`,
    `rm evals/harness.sha256` (the pulled copy replaces it).
 
+9. **The agent (S3). This costs money.** Elasticsearch up, the cases loaded (dev_small
+   was loaded in step 7 with `--keep`; a case that is not loaded is loaded first, which
+   takes up to two minutes for Train Ticket), `ANTHROPIC_API_KEY` in `~/.yi/.env`.
+
+   ```bash
+   cd ~/yiagent && git pull && uv sync && make verify && make es-up
+   uv run yi agent run --split dev_small --limit 1      # one case: check it works, see its cost
+   uv run yi agent run --split dev_small                # the rest (resumes; 3 cases at a time)
+   uv run yi eval baseline baro --split dev_small       # BARO on the same 24 cases, to compare
+   uv run yi agent run --split dev_small                # again: prints the scores beside BARO's
+   ```
+
+   A run resumes where it stopped (graded cases are kept, infra failures retried), and
+   one results directory holds one condition: to change the model, effort or step budget,
+   pass a new `--variant`. Results: `evals/results/<variant>/<split>/` (trials, scores,
+   trajectories; the full transcripts in `events/`, spans in `traces/`, both git-ignored).
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high
