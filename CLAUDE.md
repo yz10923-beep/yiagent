@@ -87,8 +87,9 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S4 (2026-10-13): fault type. Measured what each fault does (`yi eval
-fault-signals`); built prompt v2 and tools v2 as versions; next: Yi's three dev A/B runs.**
+**Current stage: S4 (2026-10-13): prompt v2 + tools v2 raise fault type from 31/77 to
+49/77 on dev (F1 RE2 0.46 -> 0.80, RE3 0.00 -> 0.24; noise floor 1 case). Next: repeat
+v2/v2, model A/B (Opus, Haiku), then the test split once.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -171,9 +172,11 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   to S3's hashes). 510 unit + 23 Elasticsearch tests.
 
 Not done yet, in order:
-1. **S4: fault type and evidence**, as A/Bs on dev (top-1 no longer separates variants):
-   runs `sonnet-repeat`, `s4-prompt`, `s4-prompt-tools` (SETUP step 10), then decide
-   what to keep. The test split is run once, for the final agent.
+1. **S4, to finish:** a repeat of v2/v2 (confirms the tools' +6), the model A/B on
+   v2/v2 (Opus 5.5, Haiku 5.5), then pick the final agent. Then build `--unload-after`
+   (the test split would exceed Elasticsearch's 1,000-shard limit if loaded with dev)
+   and run the test split once. CLI defaults stay v1 (the S3 agent): always pass
+   `--prompt v2 --tools v2` explicitly.
 2. S5 OpenRCA Bank + deploy: see ROADMAP. OpenRCA is where root-cause accuracy can
    still discriminate.
 

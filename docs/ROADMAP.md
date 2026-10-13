@@ -534,6 +534,42 @@ What the measurement says (and what it overturns):
 Runs (Sonnet 5.5, dev, about $2.40 and 5 minutes each): `sonnet-repeat` (v1/v1, the
 noise floor), `s4-prompt` (v2/v1), `s4-prompt-tools` (v2/v2).
 
+### S4 step 3: the A/B result (dev, 77 cases, Sonnet 5.5, VM 2026-10-13)
+
+| variant | prompt / tools | fault right | family right | F1 re2 | F1 re3 | expected evidence | on target | $/case | steps |
+|---|---|---|---|---|---|---|---|---|---|
+| sonnet (S3) | v1 / v1 | 31/77 | 55/77 | 0.46 | 0.00 | 0.65 | 0.90 | 0.031 | 3.7 |
+| sonnet-repeat | v1 / v1 | 30/77 | 56/77 | 0.44 | 0.00 | 0.65 | 0.88 | 0.031 | 3.7 |
+| s4-prompt | v2 / v1 | 43/77 | 73/77 | 0.71 | 0.12 | 0.85 | 0.90 | 0.045 | 4.9 |
+| **s4-prompt-tools** | **v2 / v2** | **49/77** | **75/77** | **0.80** | **0.24** | **0.88** | 0.91 | 0.044 | 4.7 |
+
+Top-1 stays at 0.99-1.00 in every run. The three runs cost $9.27.
+
+Reading:
+- **The noise floor is small:** two runs of the same agent differ by one case on fault
+  type (31 vs 30) and on family (55 vs 56).
+- **Prompt v2 is a real effect, +12 fault types and +18 families**, an order of
+  magnitude past the noise. Socket goes 0/9 -> 9/9 with cpu still 9/9; the code faults
+  stop being called mem (family right on RE3: 0/23 -> 21/23); loss 0/9 -> 3/9.
+- **Tools v2 add +6 more** (loss 3 -> 6, f4 3 -> 4, delay 8 -> 9; family 73 -> 75). That is
+  several times the measured noise, but from one run each: one repeat of v2/v2 will
+  confirm it. It costs no more per case than prompt v2 alone ($0.044).
+- **What is left:** the f-number among code faults (RE3 exact 6/23, F1 0.24: f3 is
+  read as f5 or f4, f5 as f1, f1 as f3) and mem <-> disk (5 of 18). Whether the f-number
+  is recoverable from telemetry at all is doubtful: the f5 cases crash on
+  `start(dummy_mode=False)`, which reads as an incorrect parameter value (f1). With 23
+  dev cases, further tuning on them would be fitting dev, not diagnosis.
+- **Cost of the gain:** +42% per case ($0.031 -> $0.044) and one more step: the agent
+  now checks a second family before naming the fault.
+
+Before the test split (the one look), two things to build and check here first:
+- **Elasticsearch's shard limit:** the node allows 1,000 shards; dev uses about 250, and
+  the 283 test cases would need about 760 more. Test cases will be loaded, run and
+  unloaded a few at a time (`yi agent run --unload-after`, to be built), which also
+  keeps disk and heap flat.
+- **The final agent:** v2/v2, after the repeat, and after the model A/B (Opus 5.5 and
+  Haiku 5.5 on v2/v2), so the test run reports the agent chosen on dev.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case
