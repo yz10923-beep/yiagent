@@ -205,6 +205,13 @@ def cmd_eval_coverage(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval_fault_signals(settings: Settings, args: argparse.Namespace) -> int:
+    from yi_agent.analysis import fault_signals
+
+    print(fault_signals(args.split, settings.data_dir, args.variant, progress=_progress))
+    return 0
+
+
 def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
     print(eval_run.metric_kinds(settings.data_dir, args.split))
     return 0
@@ -315,6 +322,12 @@ def build_parser() -> argparse.ArgumentParser:
     c = ev.add_parser("evidence-coverage", help="does each case's root-cause indicator exist?")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
     c.set_defaults(fn=cmd_eval_coverage)
+    c = ev.add_parser(
+        "fault-signals", help="what each fault did to its root cause (free; reads labels)"
+    )
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
+    c.add_argument("--variant", help="also show what this run's agent said the fault was")
+    c.set_defaults(fn=cmd_eval_fault_signals)
     c = ev.add_parser("metric-kinds", help="metric families each system exports")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
     c.set_defaults(fn=cmd_eval_metric_kinds)

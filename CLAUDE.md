@@ -87,8 +87,8 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S3 closed (2026-10-12): on dev, Haiku 5.5 0.99 and Sonnet 5.5 1.00 top-1
-vs BARO 0.25, with a tool-only ablation (0.31) and a placebo (0.03). Next: S4, fault type.**
+**Current stage: S4 started (2026-10-13): fault type. First step: `yi eval fault-signals`
+(free) to measure what each fault does before changing the agent (ROADMAP "S4 plan").**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -166,6 +166,7 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   systematic confusions: socket -> cpu, code faults -> mem). `yi agent compare` prints
   variants side by side.
 - 504 unit + 22 Elasticsearch tests, one of which runs the VM's commands through the CLI.
+  S4 so far: 506 unit tests.
 
 Not done yet, in order:
 1. **S4: fault type and evidence**, as A/Bs on dev (top-1 no longer separates variants):
@@ -263,6 +264,7 @@ src/yi_agent/
   cli.py      `yi data ...`, `yi eval ...`, `yi agent run`
   agent/      loop (the ~200 lines), tools (read-only, one case), prompt, runner (split ->
               trials, resumable, one condition per variant)
+  analysis.py fault-signals: what each fault did to its root cause (reads labels; S4)
   data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
               es_load (fresh indices per case, counts verified), alert, check (VM audits)
   eval/       report (the agent's output format), scoring, grade, grounding, case_data

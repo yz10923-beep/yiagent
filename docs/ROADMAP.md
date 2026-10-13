@@ -454,6 +454,24 @@ What it shows:
   target (0.90 vs 0.85), at 6x the price. Both are cheap enough to run every dev A/B.
 - The test split stays untouched: it is run once, for the final agent, after S4.
 
+## S4 plan (2026-10-13)
+
+Root-cause top-1 is saturated (S3), so S4 is about the fault type, then the evidence.
+Each change is one variant, run on dev against the S3 Sonnet run, and kept only if it
+measurably helps. In order:
+1. **Measure before changing** (free): `yi eval fault-signals --split dev --variant
+   sonnet` prints, per dev case, what the fault did to the true root cause's telemetry
+   (each metric family's rise and fall, metric gaps after the onset, log and error-log
+   counts before and after, error spans) beside what the agent said and why. It tests
+   the S3 guesses (a socket stressor moves cpu more than socket; deploying a code fault
+   restarts the service and moves memory) and shows whether the data can separate the
+   confused faults at all. It reads labels, so it lives outside `agent/` (tested).
+2. **One change per measured cause**, built and run through the CLI here first.
+3. **Noise first:** a second run of the unchanged Sonnet agent on dev, so a difference
+   between variants can be told from run-to-run variation (S3 saw single cases flip
+   between two identical Haiku runs).
+4. The test split, once, with the final agent.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case
