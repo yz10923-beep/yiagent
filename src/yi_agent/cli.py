@@ -1,6 +1,6 @@
 """`yi`: the command line. `yi data ...` (S1: fetch, check, inspect, audit, load, unload),
-`yi eval ...` (S2: baseline, score, reproduce-baro, evidence-coverage, metric-kinds) and
-`yi agent run` (S3)."""
+`yi data bank ...` (S5: OpenRCA Bank), `yi eval ...` (S2: baseline, score, reproduce-baro,
+evidence-coverage, metric-kinds) and `yi agent run` (S3)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from yi_agent.agent.prompt import GUIDES
 from yi_agent.agent.runner import Condition, ConditionChanged, compare, run_split
 from yi_agent.agent.tools import TOOLSETS
 from yi_agent.config import ConfigError, Settings, load_settings
+from yi_agent.data import openrca
 from yi_agent.data.alert import make_alert
 from yi_agent.data.check import AuditResult, audit_case, check_download, inspect_case
 from yi_agent.data.es_load import (
@@ -278,6 +279,131 @@ def cmd_agent_compare(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _bank_ids(args: argparse.Namespace) -> list[str]:
+    split = openrca.read_split()
+    known = set(split.dev) | set(split.test)
+    if args.ids:
+        if unknown := [i for i in args.ids if i not in known]:
+            raise SystemExit(f"unknown Bank query ids: {unknown}")
+        return list(args.ids)
+    if args.split == "all":
+        return sorted(known)
+    ids: list[str] = getattr(split, args.split)
+    return ids
+
+
+def _bank_verified(settings: Settings) -> list[openrca.BankQuery] | None:
+    """The labels, written next to the download, if it checks clean; else None."""
+    problems, labels = openrca.check_raw(openrca.raw_dir(settings.data_dir))
+    for p in problems:
+        print("PROBLEM", p)
+    if labels is not None:
+        openrca.labels_path(settings.data_dir).write_text(openrca.labels_json(labels))
+    return labels
+
+
+def cmd_bank_fetch(settings: Settings, args: argparse.Namespace) -> int:
+    root = openrca.raw_dir(settings.data_dir)
+    print(f"downloading OpenRCA Bank from {openrca.HF_REPO} into {root} (26.4 GB, resumable)")
+    openrca.fetch(settings.data_dir)
+    print("done; next: yi data bank check")
+    return 0
+
+
+def cmd_bank_check(settings: Settings, args: argparse.Namespace) -> int:
+    labels = _bank_verified(settings)
+    n = len(openrca.TELEMETRY_SIZES) + 2
+    if labels is None:
+        print(f"{n} files checked: problems found")
+        return 1
+    by = {q.id: q for q in labels}
+    split = openrca.read_split()
+    for part in ("dev", "test"):
+        ids: list[str] = getattr(split, part)
+        two = sum(len(by[i].failures) > 1 for i in ids)
+        reasons = Counter(f.reason for i in ids for f in by[i].failures)
+        print(f"  {part:5} {len(ids):>3} queries ({two} with two failures), {len(reasons)} reasons")
+    print(f"{len(labels)} queries; {n} files checked, 0 problems; labels and split as pinned")
+    print(f"labels written to {openrca.labels_path(settings.data_dir)}")
+    return 0
+
+
+def cmd_bank_cut(settings: Settings, args: argparse.Namespace) -> int:
+    queries = _bank_verified(settings)
+    if queries is None:
+        print("not cutting: run `yi data bank check` and fix the download first")
+        return 1
+    out = openrca.cases_dir(settings.data_dir)
+    print(f"cutting {len(queries)} query windows into {out}", flush=True)
+    report = openrca.cut(openrca.raw_dir(settings.data_dir), out, queries, _progress)
+    tot = report.totals()
+    size = sum(f.stat().st_size for f in out.rglob("*.parquet")) / 1e9
+    print(
+        f"cut {report.cases} cases in {report.seconds / 60:.1f} min, {size:.2f} GB: "
+        f"{tot.get('logs', 0):,} log lines, {tot.get('traces', 0):,} spans, "
+        f"{tot.get('metrics', 0):,} metric rows"
+    )
+    print(f"malformed lines skipped: {sum(report.bad_lines.values())} {report.bad_lines}")
+    print(f"metric cells recorded twice (mean kept): {report.duplicate_metric_cells}")
+    return 0
+
+
+def cmd_bank_inspect(settings: Settings, args: argparse.Namespace) -> int:
+    ids = args.ids or openrca.read_split().dev[:2]
+    for i in ids:
+        d = openrca.cases_dir(settings.data_dir) / i
+        print(f"=== {i}")
+        print(inspect_case(d))
+        pairs, ms, us = openrca.span_containment(d)
+        print(
+            f"  span durations: of {pairs} same-host parent/child pairs, {ms:.0%} nest if "
+            f"durations are ms (the cut's assumption), {us:.0%} if they are us"
+        )
+    return 0
+
+
+def cmd_bank_audit(settings: Settings, args: argparse.Namespace) -> int:
+    result = AuditResult()
+    ids = _bank_ids(args)
+    for n, i in enumerate(ids, 1):
+        audit_case(openrca.cases_dir(settings.data_dir) / i, result)
+        if n % 20 == 0:
+            _progress(f"  {n}/{len(ids)}")
+    print(result.render())
+    return 0
+
+
+def cmd_bank_load(settings: Settings, args: argparse.Namespace) -> int:
+    es = _es(settings)
+    ids = _bank_ids(args)
+    loader = ensure_loaded if args.keep else load_case
+    total_docs, total_s, reused, failed = 0, 0.0, 0, []
+    for n, i in enumerate(ids, 1):
+        _progress(f"[{n}/{len(ids)}] {i} ...")
+        try:
+            report = loader(es, i, openrca.cases_dir(settings.data_dir) / i, _progress)
+        except (LoadError, TelemetryError) as e:
+            print(f"{i}: FAILED {e}")
+            failed.append(i)
+            continue
+        if report.reused:
+            reused += 1
+            print(f"{i}: {report.docs:>8} docs already loaded (complete, loader v{LOADER_VERSION})")
+            continue
+        total_docs += report.docs
+        total_s += report.seconds
+        print(f"{i}: {report.docs:>8} docs in {report.seconds:5.1f}s {report.indices}", flush=True)
+        if not args.keep:
+            unload_case(es, i)
+    if total_s:
+        print(f"loaded {total_docs} docs in {total_s:.1f}s ({total_docs / total_s:,.0f}/s)")
+    if reused:
+        print(f"{reused} of {len(ids)} cases were already loaded and complete")
+    if failed:
+        print(f"{len(failed)} cases failed to load: {failed}")
+    return 1 if failed else 0
+
+
 def cmd_unload(settings: Settings, args: argparse.Namespace) -> int:
     es = _es(settings)
     for i in args.ids:
@@ -315,6 +441,31 @@ def build_parser() -> argparse.ArgumentParser:
     c = data.add_parser("unload", help="delete a case's indices")
     c.add_argument("ids", nargs="+")
     c.set_defaults(fn=cmd_unload)
+    bank = data.add_parser("bank", help="OpenRCA Bank (S5)").add_subparsers(
+        dest="bank_cmd", required=True
+    )
+    bank.add_parser("fetch", help="download Bank (26.4 GB) from Hugging Face").set_defaults(
+        fn=cmd_bank_fetch
+    )
+    bank.add_parser("check", help="verify the download against the frozen labels").set_defaults(
+        fn=cmd_bank_check
+    )
+    bank.add_parser("cut", help="cut each query's window into a case directory").set_defaults(
+        fn=cmd_bank_cut
+    )
+    c = bank.add_parser("inspect", help="schemas, time units, span durations of cut cases")
+    c.add_argument("ids", nargs="*", help="query ids (default: two dev queries)")
+    c.set_defaults(fn=cmd_bank_inspect)
+    for name, fn, help_ in (
+        ("audit", cmd_bank_audit, "scan cut cases for anything that could leak the answer"),
+        ("load", cmd_bank_load, "load cut cases into Elasticsearch, verify counts, then unload"),
+    ):
+        c = bank.add_parser(name, help=help_)
+        c.add_argument("ids", nargs="*", help="query ids (default: the whole --split)")
+        c.add_argument("--split", choices=("dev", "test", "all"), default="dev")
+        if name == "load":
+            c.add_argument("--keep", action="store_true", help="keep the indices; reuse a load")
+        c.set_defaults(fn=fn)
 
     ev = sub.add_parser("eval", help="graders and baselines").add_subparsers(
         dest="cmd", required=True

@@ -89,7 +89,9 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 **Current stage: S5 (next). S4 closed (2026-10-13): on the 283-case test split, run
 once, the final agent (Sonnet 5.5 + prompt v2 + tools v2) scores AC@1 0.98 (BARO 0.29),
-Avg@5 0.99 (0.79), fault type 189/283, F1 RE2 0.75 / RE3 0.40, $0.041 a case.**
+Avg@5 0.99 (0.79), fault type 189/283, F1 RE2 0.75 / RE3 0.40, $0.041 a case.
+S5 step 1 (Bank data: fetch, check, cut, inspect, audit, load) built and tested on a
+synthetic Bank; next: Yi runs SETUP step 12 on the VM. Plan: ROADMAP "S5 plan".**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -174,8 +176,11 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   `--prompt v2 --tools v2` for the final agent.
 
 Not done yet, in order:
-1. S5 OpenRCA Bank + deploy: see ROADMAP. OpenRCA is where root-cause accuracy can
-   still discriminate.
+1. S5 OpenRCA Bank + deploy (ROADMAP "S5 decisions", "S5 plan"): step 1, the data, is
+   built (`data/openrca.py`, `yi data bank ...`; the labels are built on the VM from the
+   download, only their hash is pinned; split `evals/split_bank.json`, 34 dev / 102 test). Then the grader
+   (a port of OpenRCA's evaluate, checked against Microsoft's archived run), the agent
+   on Bank, test once, deploy. Bank data is for private evaluation: never commit it.
 
 ## Where this came from (decisions already made; don't re-litigate)
 
@@ -268,19 +273,23 @@ src/yi_agent/
               trials, resumable, one condition per variant)
   analysis.py fault-signals: what each fault did to its root cause (reads labels; S4)
   data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
+              openrca (Bank: queries, labels, split, fetch, check, cut into case dirs),
               es_load (fresh indices per case, counts verified), alert, check (VM audits)
   eval/       report (the agent's output format), scoring, grade, grounding, case_data
               (grader reads Parquet), baro (port of RCAEval's), baselines, harness
               (hash + approval), run (baseline -> trials -> scores.json), tables
 evals/grader/labels.json  id -> label; harness and graders only, never the agent
 evals/split.json          frozen dev / dev_small / test ids (hash pinned)
+evals/split_bank.json     frozen Bank dev / test query ids (hash pinned; Bank's labels
+                          live next to its download, never in the repo)
 evals/harness.sha256      the harness hash Yi approved (scoring refuses any other)
 evals/results/<variant>/<split>/  trials.jsonl + scores.json (with the harness hash)
-LICENSES/                 third-party licences (RCAEval, for the BARO port)
+LICENSES/                 third-party licences (RCAEval for the BARO port; OpenRCA)
 tests/unit/          fast, no network
 tests/integration/   need Elasticsearch (marker `es`)
 tests/fakes.py       ScriptedProvider etc. for loop tests (from kama)
 tests/rcaeval_fixture.py  tiny synthetic cases in the real on-disk layout
+tests/openrca_fixture.py  a tiny synthetic Bank download in the real layout
 docs/                ROADMAP.md, SETUP.md
 scripts/wait_es.sh   readiness wait for make es-up
 ```

@@ -9,7 +9,8 @@ hidden labels from public benchmarks:
 
 - **[RCAEval](https://github.com/phamquiluan/RCAEval)** (WWW 2025, MIT): RE2 and RE3,
   360 fault-injected failure cases in three microservice systems.
-- **[OpenRCA](https://github.com/microsoft/OpenRCA)** (ICLR 2025), the Bank system, later.
+- **[OpenRCA](https://github.com/microsoft/OpenRCA)** (ICLR 2025, code MIT), the Bank system
+  (S5; its data is used for private evaluation only and never redistributed).
 
 Metrics: macro-F1 on the fault type, top-k accuracy on the root-cause service, evidence
 grounding (does every citation exist and support the claim), and trajectory cost (steps,

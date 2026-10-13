@@ -62,11 +62,18 @@ def test_every_agent_command_reaches_its_own_handler(argv: list[str], fn: str) -
 def test_every_subcommand_has_a_handler() -> None:
     import argparse
 
-    parser = cli.build_parser()
-    groups = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
-    for group in groups:
-        for name, sub in group.choices.items():
-            for inner in sub._actions:
-                if isinstance(inner, argparse._SubParsersAction):
-                    for cmd, leaf in inner.choices.items():
-                        assert leaf.get_default("fn") is not None, f"yi {name} {cmd}"
+    def leaves(p: argparse.ArgumentParser, path: str) -> list[tuple[str, argparse.ArgumentParser]]:
+        subs = [a for a in p._actions if isinstance(a, argparse._SubParsersAction)]
+        if not subs:
+            return [(path, p)]
+        return [
+            leaf
+            for a in subs
+            for cmd, sub in a.choices.items()
+            for leaf in leaves(sub, f"{path} {cmd}")
+        ]
+
+    found = leaves(cli.build_parser(), "yi")
+    assert "yi data bank cut" in [path for path, _ in found]
+    for path, leaf in found:
+        assert leaf.get_default("fn") is not None, path

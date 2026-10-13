@@ -488,6 +488,60 @@ cloud container), and Microsoft's README:
 - Model cost estimate: ~136 cases x $0.04-0.08 (more steps on a harder benchmark) =
   ~$6-11 a run.
 
+## S5 decisions (made 2026-10-13; Yi: Bank yes, data for private evaluation only)
+
+- **A case is one query** of `Bank/query.csv` (136), graded as OpenRCA grades it: its
+  `scoring_points`, kept verbatim, read by a port of OpenRCA's `main/evaluate.py` (MIT;
+  step 2). A query scores the share of its points matched (time within 1 minute,
+  component and reason exact, best pairing over the failures); strict accuracy counts
+  queries with every point. The prediction must name as many failures as the query has,
+  or it scores 0, as in OpenRCA.
+- **Labels**: per query its window, task, what is asked, the scoring points, and the
+  `record.csv` rows inside the window (the full truth, for diagnosis). Built from the two
+  small files, which match on all 136 queries (every window holds exactly as many
+  records as it has failures, all 136 records used; scoring points are not always in
+  time order, so they are compared as sets). **Only their hash is in the repo**: on the
+  VM, `yi data bank check` verifies both files' sha256 and every telemetry file's size,
+  builds the labels, checks their pinned hash and that the committed split is reproduced
+  from them, and writes them next to the download (`openrca/bank-labels.json`).
+- **Split** (`evals/split_bank.json`, pinned): grouped by window (9 windows are asked
+  twice; both queries stay together), stratified by the failure's reason with the
+  two-failure windows as their own stratum, a quarter of each stratum to dev. **Dev 34
+  queries, test 102**; both hold all 8 reasons and some two-failure windows.
+- **The cut:** each query's window plus the 30 minutes before it (a baseline; it may
+  hold an earlier failure, as an on-call engineer's view would), never anything after
+  the window, written as an RCAEval-shaped case (`logs/traces/metrics.parquet` with
+  RCAEval's column names: `container_name`/`message`, `serviceName`/`spanID`/
+  `parentSpanID`/`duration` in us, wide metrics `<cmdb_id>_<kpi_name>` and
+  `<tc>_<kpi>`), so the loader, tools and grader readers are reused unchanged. Case
+  directories are named by opaque id; `window.json` holds only the window. No onset
+  file: in OpenRCA the time is part of the answer.
+- **Assumption to check on the VM:** Bank's span durations are ms (its timestamps are).
+  `yi data bank inspect` measures how often same-host child spans nest in their parents
+  under ms and under us.
+- **Data use:** the mirror `cdreetz/OpenRCA` (the official copy is a Google Drive
+  folder the cloud container can't reach). Its `query.csv` equals the instructions of
+  Microsoft's archived Bank run 136/136. Used for private evaluation only; never
+  committed or redistributed; the paper is cited. OpenRCA's MIT licence is in
+  `LICENSES/` for the copied candidate lists and grader patterns.
+- **The bar:** Microsoft's archived RCA-agent run on Bank (Claude 3.5 Sonnet,
+  `rca/archive/agent-Bank.csv`): strict 20/136 (14.7%), mean partial score 0.23, as
+  their file records it. Step 2 re-grades it with our port.
+
+## S5 plan
+
+1. **Data** (built and tested on a synthetic Bank, 2026-10-13): `yi data bank fetch |
+   check | cut | inspect | audit | load` (SETUP step 12).
+2. **The grader:** port `evaluate()`, replay Microsoft's archived predictions (each
+   row's recorded score reproduced), oracle / empty / random baselines, Bank files added
+   to the harness hash (Yi re-approves).
+3. **The agent on Bank:** an alert with the window, the number of failures, what is
+   asked and OpenRCA's candidate components and reasons; a report with an occurrence time
+   and one or two root causes; tools that work without a given onset (compare the window
+   with its baseline; minute-level series to pin the time); a Bank prompt. Tuned on dev.
+4. **Test, once.**
+5. **Deploy:** the alert webhook and a results dashboard.
+
 ## S4 plan (2026-10-13)
 
 Root-cause top-1 is saturated (S3), so S4 is about the fault type, then the evidence.

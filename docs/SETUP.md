@@ -187,6 +187,24 @@ the binding to 0.0.0.0.
     two minutes to load; more than 5 minutes with no new line means something is stuck.
     Stopping is safe: rerun the same command and it resumes.
 
+12. **OpenRCA Bank data (S5; free, about an hour, mostly the download).** 26.4 GB into
+    `YI_DATA_DIR/openrca`, plus about 3-6 GB of cut cases. Run inside `tmux` (step 11).
+    One block per step; send the output of each before the next.
+
+    ```bash
+    uv run yi data bank fetch 2>&1 | tee ~/bank-fetch.txt     # resumable; progress bars per file
+    uv run yi data bank check 2>&1 | tee ~/bank-check.txt     # seconds; expect "0 problems"
+    uv run yi data bank cut 2>&1 | tee ~/bank-cut.txt         # 10-30 min; refuses unless check passes
+    uv run yi data bank inspect 2>&1 | tee ~/bank-inspect.txt # seconds
+    uv run yi data bank audit --split all 2>&1 | tee ~/bank-audit.txt  # a few minutes
+    uv run yi data bank load --split dev --keep 2>&1 | tee ~/bank-load.txt  # 34 cases, ~30 min
+    ```
+
+    The fetch shows a progress bar per file (a trace file is about 2.5 GB); if no bar
+    moves for 5 minutes, stop it (Ctrl-C) and rerun: it resumes. The cut prints each of
+    its 40 files, and every 0.5 GB within the large ones; it is all or nothing, so an
+    interrupted cut is simply rerun. The load prints progress per case.
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high
