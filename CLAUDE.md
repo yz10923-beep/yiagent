@@ -87,9 +87,9 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S4 (2026-10-13): final agent chosen on dev, Sonnet 5.5 + prompt v2 +
-tools v2 (fault type 46 +- 3 of 77 over three runs, from 30.5 with v1; Haiku failed the
-pre-set rule at 41.7). Next: the test split, once (`--unload-after`, SETUP step 11).**
+**Current stage: S5 (next). S4 closed (2026-10-13): on the 283-case test split, run
+once, the final agent (Sonnet 5.5 + prompt v2 + tools v2) scores AC@1 0.98 (BARO 0.29),
+Avg@5 0.99 (0.79), fault type 189/283, F1 RE2 0.75 / RE3 0.40, $0.041 a case.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -170,13 +170,11 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   S4 so far: `yi eval fault-signals` and `yi eval confusion` (free, read labels, live in
   `analysis.py`, never imported by `agent/`); `--prompt v1|v2 --tools v1|v2` (v1 pinned
   to S3's hashes); `yi eval agreement` (repeats case by case); `--unload-after`. 511 unit + 24 ES tests.
+  S4 result: ROADMAP "S4 result". CLI defaults stay v1 (the S3 agent): pass
+  `--prompt v2 --tools v2` for the final agent.
 
 Not done yet, in order:
-1. **S4, to finish:** the test split, once, with the final agent (SETUP step 11:
-   `--unload-after`, since the test split would exceed Elasticsearch's 1,000-shard limit
-   if loaded with dev), plus BARO on test; then the S4 write-up. CLI defaults stay v1
-   (the S3 agent): always pass `--prompt v2 --tools v2` explicitly.
-2. S5 OpenRCA Bank + deploy: see ROADMAP. OpenRCA is where root-cause accuracy can
+1. S5 OpenRCA Bank + deploy: see ROADMAP. OpenRCA is where root-cause accuracy can
    still discriminate.
 
 ## Where this came from (decisions already made; don't re-litigate)

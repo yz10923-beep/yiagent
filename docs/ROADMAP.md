@@ -11,7 +11,7 @@ Evals come before the agent: S2 grades a null and an oracle answer before S3 exi
 | **S2** | Eval harness: graders, baselines, selftest | Oracle scores 1.0, null scores at chance, a wrong answer fails, all inside `make verify`; the classical baseline (BARO) is scored on the dev split |
 | **S3** | The agent: a loop written here, read-only telemetry tools, a structured final report | First paid dev run, compared with BARO per fault type; every run has a trace |
 | **S4** | Improvements, each one an A/B: log template grouping, grounding feedback, model and effort | Each change has a measured effect (or a measured non-effect) on dev |
-| **S5** | Generalize and deploy: OpenRCA Bank adapter, alert-webhook service, results dashboard | One test-split run, reported once; the same agent runs on OpenRCA Bank |
+| **S5** | Generalize and deploy: OpenRCA Bank adapter, alert-webhook service, results dashboard | The same agent runs on OpenRCA Bank, measured against its baselines (RCAEval's test split was run once, at the end of S4) |
 
 ## S0 result (2026-10-11)
 
@@ -625,6 +625,37 @@ score is within 3 cases of Sonnet's and its evidence on target within 0.05.
 
 **Final agent: Sonnet 5.5, prompt v2, tools v2.** Next: the test split, once.
 
+### S4 result: the test split, once (283 cases, VM 2026-10-13). S4 closed.
+
+The final agent (Sonnet 5.5, prompt v2, tools v2, chosen on dev in step 5) and BARO, on
+the 283 test cases nothing was tuned on. One run, as planned; `--unload-after` kept
+Elasticsearch under its shard limit (no unload failed). Logs: `~/test-run.txt`,
+`~/test-baro.txt` on the VM.
+
+| | AC@1 (95% CI) | AC@3 | Avg@5 | fault right | family right | F1 re2 | F1 re3 | on target | $/case |
+|---|---|---|---|---|---|---|---|---|---|
+| BARO | 0.29 (0.24-0.35) | 0.92 | 0.79 | - | - | 0.15 | 0.00 | 0.29 | free |
+| **agent** | **0.98 (0.96-0.99)** | 0.99 | 0.99 | **189/283** | 269/283 | **0.75** | **0.40** | 0.93 | 0.041 |
+
+283/283 submitted, 0 infra failures, 0 tool errors; 4.5 steps, 8.1 tool calls, 26 s per
+case (max 16 steps, $0.17); $11.68 in all. Citations: exists 1.00, holds 1.00, the
+paper's root-cause indicator cited in 0.88 of the cases that have one.
+
+- **Dev held up on test.** Fault type right 67% on test against 60% on dev (46 +- 3 of
+  77); RE2 161/216, RE3 28/67, family 269/283. Nothing suggests dev was overfit: the
+  changes were mechanisms (step 1), not case-specific rules.
+- **Top-1 misses (5):** four are network faults on Train Ticket's auth service, where
+  the agent named its database (`ts-auth-mongo`) or a caller first; all but one have
+  the true service in the top 3.
+- **Fault type, true -> named (test):** socket 33/36 and cpu 32/36 (S3's systematic
+  socket -> cpu is gone on held-out cases); delay 34/36; disk 26/36. What remains:
+  **mem -> disk 15 of 36** (worse than dev's 5/18), **loss -> delay 11 of 36**, and the
+  f-number among code faults (exact 28/67, family 61/67: f3 read as f4/f5, f4 as f5).
+- **BARO on test** is AC@1 0.29, close to the paper's level and to dev's 0.25; it has no
+  fault-type model beyond the top metric's family (F1 0.15 / 0.00).
+- **Not on test, on purpose:** Opus (one dev run, 54/77) and the S3 v1 agent. Their test
+  numbers would be a second look; dev is where they were compared.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case
@@ -669,6 +700,25 @@ about 1.9x faster. Open: timed loads of dev_small on the VM, with disk use.
 ## Interview talking points
 
 (Filled in as each stage closes, with numbers.)
+
+**S4 (fault type, and one look at test).**
+- *The result, on 283 held-out test cases:* root cause first 98% (BARO 29%), Avg@5 0.99
+  (BARO 0.79); fault type right 67%, macro-F1 0.75 on RE2 and 0.40 on RE3 (BARO 0.15 and
+  0.00); every citation exists and holds; $0.041 and 26 s a case. One run, chosen on dev
+  before test was touched.
+- *Measure before changing:* a free per-case table of what each fault did to its root
+  cause showed why the S3 agent erred (a socket stressor burns CPU, but raises sockets
+  far more; deploying a code fault restarts the service and drops memory). The prompt
+  changes describe those mechanisms; socket went 0/9 -> 9/9 on dev and 33/36 on test.
+- *Noise is a measurement, not a footnote:* the models reject temperature, and the same
+  condition scored 49 and 43. Three repeats per model and a case-by-case agreement table
+  (right in all, wrong in all, flipping) turned "Haiku is about as good" into a rule set
+  before the runs: Haiku failed it (41.7 vs 46.0), so the cheaper model was not taken.
+  A claimed +6 from new tools did not survive its repeat and was withdrawn.
+- *What isn't solved:* mem vs disk (a memory stressor's page-cache traffic looks like
+  disk I/O), loss vs delay, and the exact code-fault number, which may not be
+  recoverable from telemetry at all. Localization is saturated on RCAEval; OpenRCA (S5)
+  is where it can still discriminate.
 
 **S3 (the agent).**
 - *The result:* on 77 held-out dev cases the agent names the root-cause service first in
