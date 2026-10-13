@@ -454,6 +454,40 @@ What it shows:
   target (0.90 vs 0.85), at 6x the price. Both are cheap enough to run every dev A/B.
 - The test split stays untouched: it is run once, for the final agent, after S4.
 
+## Facts about OpenRCA Bank (checked 2026-10-13, before any download)
+
+From the file listing and the small files of the Hugging Face mirror
+`cdreetz/OpenRCA` (the official copy is a Google Drive folder, unreachable from the
+cloud container), and Microsoft's README:
+- **Bank is 26.4 GB of CSV, not 80.** The ~70-80 GB is all three systems. Bank is 10 days
+  (2021-03-04 to 03-25), each with `trace/trace_span.csv` (21.9 GB in all, ~146M spans:
+  83% of the bytes), `log/log_service.csv` (3.6 GB, ~10M lines; many are JVM GC lines),
+  `metric/metric_container.csv` (0.84 GB, ~15M rows, long form: timestamp, cmdb_id,
+  kpi_name, value) and `metric/metric_app.csv` (6 MB). Row counts are estimated from
+  sampled line lengths.
+- **~136 faults** in `record.csv` (level, component, timestamp, datetime, reason), on 14
+  components (Tomcat01-04, MG01-02, IG01-02, apache01-02, Mysql01-02, Redis01-02) and 8
+  reasons (high CPU, high memory, high JVM CPU load, JVM OOM heap, disk I/O read, disk
+  space, network latency, network packet loss). About 15 per recorded day.
+- **~136 queries** in `query.csv`: each a 30-minute window in natural language, of 7
+  task types (time only; reason only; component only; and their combinations), graded by
+  `scoring_points` (component exact, reason exact, time within 1 minute). About 17 windows
+  hold two failures. So the report needs an occurrence time and possibly two causes, and
+  the grader is OpenRCA's, not ours: an adapter decision for S5.
+- **Windows, not days.** A 30-minute window plus a 30-minute baseline is 1/24 of a day:
+  roughly 0.8M documents a case (mostly spans), ~110M over all cases loaded one at a time
+  with `--unload-after` (~2 h at the VM's 15K docs/s), or ~170M to load the ten days
+  whole once (~3 h, with every query then bounded to its window, as the placebo's
+  ceiling already is).
+- **Licence:** OpenRCA's code is MIT; the README states no licence for the data, and the
+  mirror has no dataset card. Use it for private evaluation, cite the paper, never
+  redistribute it.
+- **Known criticism:** some labels may not be recoverable from the data (one Bank case's
+  memory is ~98% before, during and after the injection). Report per-task-type scores and
+  look at failures case by case before trusting an aggregate.
+- Model cost estimate: ~136 cases x $0.04-0.08 (more steps on a harder benchmark) =
+  ~$6-11 a run.
+
 ## S4 plan (2026-10-13)
 
 Root-cause top-1 is saturated (S3), so S4 is about the fault type, then the evidence.
