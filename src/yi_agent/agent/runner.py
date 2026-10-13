@@ -28,7 +28,7 @@ from yi_agent.agent.loop import AgentConfig, AgentResult, InfraFailure, run_agen
 from yi_agent.agent.prompt import GUIDES, system_prompt, system_sha
 from yi_agent.agent.tools import TOOLSETS, CaseIndices, CaseTools, dispatch
 from yi_agent.data.alert import make_alert
-from yi_agent.data.es_load import LoadError, ensure_loaded
+from yi_agent.data.es_load import LoadError, ensure_loaded, unload_case
 from yi_agent.data.rcaeval import CaseLabel
 from yi_agent.data.telemetry import read_window
 from yi_agent.eval import run as eval_run
@@ -142,10 +142,13 @@ async def run_split(
     parallel: int = 1,
     progress: Progress | None = None,
     results_dir: Path | None = None,
+    unload_after: bool = False,
 ) -> str:
     """Run (or resume) the agent on a split and return the printed summary. With
     `limit`, only the first cases run (a smoke test); scoring needs the whole split.
-    `parallel` cases run at once; each is still one sequential investigation."""
+    `parallel` cases run at once; each is still one sequential investigation.
+    `unload_after` deletes each case's indices once its trial is written, so at most
+    `parallel` cases are loaded at a time (the test split would not fit with dev's)."""
     check_approval(False)  # refuse before spending anything on a run that can't be scored
     say = progress or (lambda _: None)
     labels = eval_run.labels_by_id()
@@ -168,6 +171,11 @@ async def run_split(
             trial, traj = await _run_case(
                 label, data_dir, es, make_provider, config, run_dir, say, cond
             )
+            if unload_after:
+                try:
+                    await asyncio.to_thread(unload_case, es, case_id)
+                except (ApiError, TransportError) as e:  # the trial stands; space is lost
+                    say(f"  {case_id}: could not unload ({e}); run `yi data unload {case_id}`")
         # One event loop: these writes never interleave, and each leaves a valid file.
         done[case_id] = trial
         with (run_dir / "trajectories.jsonl").open("a") as fh:

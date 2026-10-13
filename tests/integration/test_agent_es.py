@@ -497,3 +497,31 @@ def test_tools_v2_count_error_lines_and_filter_to_them(es: Elasticsearch, tmp_pa
         assert "  cartservice: 6 / 7" in dispatch(plain, "overview", {})
     finally:
         unload_case(es, label.id)
+
+
+def test_unload_after_leaves_no_case_loaded_and_resume_still_works(
+    es: Elasticsearch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dev_small: tuple[Path, list[CaseLabel]],
+) -> None:
+    """How the test split runs (it would exceed the shard limit if loaded beside dev):
+    each case is loaded, investigated, written, then unloaded."""
+    from yi_agent import cli
+
+    data_dir, labels = dev_small
+    monkeypatch.setenv("YI_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(runner, "RESULTS_DIR", tmp_path / "results")
+    argv = ["agent", "run", "--split", "dev_small", "--model", "policy:metric-top"]
+    argv += ["--variant", "u", "--unload-after", "--parallel", "2", "--prompt", "v2"]
+    assert cli.main([*argv, "--limit", "3"]) == 0
+    assert "partial run: 3 of 24" in capsys.readouterr().out
+    for c in labels:
+        assert not es.indices.exists(index=f"yi-{c.id}-metrics"), c.id
+    assert cli.main(argv) == 0  # resumes: the other 21, each loaded and unloaded
+    out = capsys.readouterr().out
+    assert "AC@1" in out
+    assert not any(es.indices.exists(index=f"yi-{c.id}-metrics") for c in labels)
+    trials = (tmp_path / "results" / "u" / "dev_small" / "trials.jsonl").read_text()
+    assert len(trials.splitlines()) == 24

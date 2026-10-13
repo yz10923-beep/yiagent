@@ -172,6 +172,21 @@ the binding to 0.0.0.0.
     uv run yi eval confusion --split dev sonnet sonnet-repeat s4-prompt s4-prompt-tools
     ```
 
+11. **The test split, once (paid: about $12.50 on Sonnet 5.5; 3-4 hours, mostly loading).**
+    The 283 test cases are loaded, investigated and unloaded a few at a time
+    (`--unload-after`), because loading them beside dev would pass Elasticsearch's
+    1,000-shard limit. Run it inside `tmux`, so a dropped SSH connection doesn't stop it
+    (`tmux new -s test`; detach with Ctrl-b then d; come back with `tmux attach -t test`).
+
+    ```bash
+    uv run yi eval baseline baro --split test       # free, a few minutes
+    uv run yi agent run --split test --variant final --prompt v2 --tools v2 --unload-after --parallel 3 2>&1 | tee ~/test-run.txt
+    ```
+
+    Each case prints load progress, then its result line. A Train Ticket case can take
+    two minutes to load; more than 5 minutes with no new line means something is stuck.
+    Stopping is safe: rerun the same command and it resumes.
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

@@ -265,6 +265,7 @@ def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
             limit=args.limit,
             parallel=args.parallel,
             progress=_progress,
+            unload_after=args.unload_after,
         )
     )
     print(summary)
@@ -382,6 +383,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--placebo",
         action="store_true",
         help="control: a false onset 6 min early, nothing visible from the real one on",
+    )
+    c.add_argument(
+        "--unload-after",
+        action="store_true",
+        help="delete each case's indices after its trial (keeps few cases loaded)",
     )
     c.add_argument("--prompt", choices=sorted(GUIDES), default="v1", help="prompt version")
     c.add_argument("--tools", choices=sorted(TOOLSETS), default="v1", help="tool version")

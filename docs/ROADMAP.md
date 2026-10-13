@@ -598,6 +598,33 @@ Top-1 1.00 in all four. The three new runs cost $12.70.
 - Decision pending: two more Haiku runs and one more Sonnet run (and, if Opus is a
   candidate for the final agent, one more Opus run), then `yi eval agreement` per model.
 
+### S4 step 5: repeats and the model decision (dev, v2/v2, VM 2026-10-13)
+
+The rule, written before these runs: Haiku replaces Sonnet if its 3-run mean fault-type
+score is within 3 cases of Sonnet's and its evidence on target within 0.05.
+
+| model | fault right, 3 runs | mean | on target (mean) | flip between runs | right in all / wrong in all | $/case |
+|---|---|---|---|---|---|---|
+| Sonnet 5.5 | 49, 43, 46 | **46.0** | 0.90 | 18/77 | 39 / 23 | 0.044 |
+| Haiku 5.5 | 44, 44, 37 | 41.7 | 0.85 | 31/77 | 33 / 28 | 0.0065 |
+| Opus 5.5 | 54 (one run) | - | 0.84 | - | - | 0.114 |
+
+- **Haiku fails the rule** (4.3 cases behind, on target 0.047 behind) and is the less
+  stable model (31 cases flip vs 18). **Sonnet stays.** Cost was not part of the rule
+  on purpose: Haiku is 1/7 of the price, and the rule says what that saving costs in
+  diagnosis.
+- **Prompt v2's gain is robust:** v1 scored 31 and 30, v2 46 +- 3 over three runs, about
+  +15 cases. The tools' share of it is not separable from noise (prompt v2 alone: 43,
+  one run); tools v2 stay in the final agent at no cost, with no gain claimed.
+- **Opus's 54 is 5 above Sonnet's best of three**, likely real but one run, at 2.6x
+  Sonnet's cost. It stays the measured ceiling, not the final agent, unless Yi chooses
+  to pay for it.
+- **What stays wrong in every Sonnet run (23 cases):** mostly f-numbers (f5 always read
+  as f1, f3 as f5) and mem <-> disk. These are the diagnosis limits of this agent on
+  this benchmark.
+
+**Final agent: Sonnet 5.5, prompt v2, tools v2.** Next: the test split, once.
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case
