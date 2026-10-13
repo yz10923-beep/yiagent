@@ -551,9 +551,9 @@ Reading:
 - **Prompt v2 is a real effect, +12 fault types and +18 families**, an order of
   magnitude past the noise. Socket goes 0/9 -> 9/9 with cpu still 9/9; the code faults
   stop being called mem (family right on RE3: 0/23 -> 21/23); loss 0/9 -> 3/9.
-- **Tools v2 add +6 more** (loss 3 -> 6, f4 3 -> 4, delay 8 -> 9; family 73 -> 75). That is
-  several times the measured noise, but from one run each: one repeat of v2/v2 will
-  confirm it. It costs no more per case than prompt v2 alone ($0.044).
+- ~~Tools v2 add +6 more~~ **Not established** (corrected below): the repeat of v2/v2
+  scored 43, the same as prompt v2 alone. I had judged the +6 against the noise of v1,
+  whose errors were systematic and therefore stable; v2's are not (step 4).
 - **What is left:** the f-number among code faults (RE3 exact 6/23, F1 0.24: f3 is
   read as f5 or f4, f5 as f1, f1 as f3) and mem <-> disk (5 of 18). Whether the f-number
   is recoverable from telemetry at all is doubtful: the f5 cases crash on
@@ -569,6 +569,34 @@ Before the test split (the one look), two things to build and check here first:
   keeps disk and heap flat.
 - **The final agent:** v2/v2, after the repeat, and after the model A/B (Opus 5.5 and
   Haiku 5.5 on v2/v2), so the test run reports the agent chosen on dev.
+
+### S4 step 4: the model A/B, and the noise it exposed (dev, v2/v2, VM 2026-10-13)
+
+| run | model | fault right | family right | F1 re2 | F1 re3 | on target | $/case | steps | s/case |
+|---|---|---|---|---|---|---|---|---|---|
+| s4-prompt-tools | Sonnet 5.5 | 49/77 | 75/77 | 0.80 | 0.24 | 0.91 | 0.044 | 4.7 | 21 |
+| s4-repeat | Sonnet 5.5 | 43/77 | 73/77 | 0.70 | 0.17 | 0.91 | 0.045 | 4.9 | 14 |
+| opus-s4 | Opus 5.5 | **54/77** | 74/77 | 0.82 | **0.39** | 0.84 | 0.114 | 5.8 | 24 |
+| haiku-s4 | Haiku 5.5 | 44/77 | 71/77 | 0.74 | 0.12 | 0.87 | **0.006** | 7.5 | 31 |
+
+Top-1 1.00 in all four. The three new runs cost $12.70.
+
+- **The runs are not deterministic, and v2 is noisier than v1.** The same Sonnet
+  condition scored 49 and 43. v1's two runs differed by one because its mistakes were
+  systematic (socket always called cpu); v2 replaced them with close calls (which
+  f-number, loss or delay) that flip from run to run. Sampling can't be pinned: these
+  models reject temperature and top_p. So a single run per condition can't separate
+  conditions closer than about 6 cases; repeats, compared case by case, can
+  (`yi eval agreement`, free: per case, right in every run, wrong in every run, or
+  flipping).
+- **Haiku (44) sits inside Sonnet's range (43-49)** at 1/7 of the cost, but scores lower on
+  RE3 (0.12) and evidence on target (0.87 vs 0.91), and takes longer (7.5 steps, 31 s).
+  One run: plausible, not shown.
+- **Opus (54) is above both Sonnet runs**, mostly on code faults (f1 3/4, f3 4/9; RE3 F1
+  0.39), at 2.5x Sonnet's cost; its citations are less often on target (0.84). Also one
+  run.
+- Decision pending: two more Haiku runs and one more Sonnet run (and, if Opus is a
+  candidate for the final agent, one more Opus run), then `yi eval agreement` per model.
 
 ## Ideas for S2 from S1
 

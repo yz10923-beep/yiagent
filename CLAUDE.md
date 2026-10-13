@@ -87,9 +87,9 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S4 (2026-10-13): prompt v2 + tools v2 raise fault type from 31/77 to
-49/77 on dev (F1 RE2 0.46 -> 0.80, RE3 0.00 -> 0.24; noise floor 1 case). Next: repeat
-v2/v2, model A/B (Opus, Haiku), then the test split once.**
+**Current stage: S4 (2026-10-13): prompt v2 lifts fault type from 31/77 to 43-49/77 on
+dev (Sonnet, two runs); runs are not deterministic (same condition 49 vs 43). Model A/B,
+one run each: Opus 54, Haiku 44 at 1/7 Sonnet's cost. Next: repeats, then pick a model.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -169,11 +169,11 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
 - 504 unit + 22 Elasticsearch tests, one of which runs the VM's commands through the CLI.
   S4 so far: `yi eval fault-signals` and `yi eval confusion` (free, read labels, live in
   `analysis.py`, never imported by `agent/`); `--prompt v1|v2 --tools v1|v2` (v1 pinned
-  to S3's hashes). 510 unit + 23 Elasticsearch tests.
+  to S3's hashes); `yi eval agreement` (repeats case by case). 511 unit + 23 ES tests.
 
 Not done yet, in order:
-1. **S4, to finish:** a repeat of v2/v2 (confirms the tools' +6), the model A/B on
-   v2/v2 (Opus 5.5, Haiku 5.5), then pick the final agent. Then build `--unload-after`
+1. **S4, to finish:** repeats per model on v2/v2 (`yi eval agreement` compares them case
+   by case), then pick the final agent. Then build `--unload-after`
    (the test split would exceed Elasticsearch's 1,000-shard limit if loaded with dev)
    and run the test split once. CLI defaults stay v1 (the S3 agent): always pass
    `--prompt v2 --tools v2` explicitly.

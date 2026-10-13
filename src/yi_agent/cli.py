@@ -221,6 +221,13 @@ def cmd_eval_confusion(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval_agreement(settings: Settings, args: argparse.Namespace) -> int:
+    from yi_agent.analysis import agreement
+
+    print(agreement(args.split, args.variants))
+    return 0
+
+
 def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
     print(eval_run.metric_kinds(settings.data_dir, args.split))
     return 0
@@ -346,6 +353,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("variants", nargs="+")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
     c.set_defaults(fn=cmd_eval_confusion)
+    c = ev.add_parser(
+        "agreement", help="repeated runs of one condition, case by case (free; reads labels)"
+    )
+    c.add_argument("variants", nargs="+")
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
+    c.set_defaults(fn=cmd_eval_agreement)
     c = ev.add_parser("metric-kinds", help="metric families each system exports")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
     c.set_defaults(fn=cmd_eval_metric_kinds)

@@ -90,3 +90,36 @@ def test_confusion_runs_through_the_cli(
     assert re.search(r"socket \(resource\) -> mem \d+", out)
     assert "none 1" in out
     assert "missing: no trials" in out
+
+
+def test_agreement_counts_stable_and_flipping_cases_through_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = {c.id: c for c in read_labels(LABELS_PATH)}
+    ids = read_split(SPLIT_PATH).dev
+    flip = ids[:5]  # run a is right on these, run b names "cpu" (wrong unless truth is cpu)
+
+    def run(name: str, flipped: bool) -> None:
+        trials = [
+            Trial(
+                case_id=i,
+                report=Report(
+                    case_id=i, fault_type="cpu" if flipped and i in flip else by_id[i].fault
+                ),
+            )
+            for i in ids
+        ]
+        write_trials(trials, tmp_path / name / "dev" / "trials.jsonl")
+
+    run("a", False)
+    run("b", True)
+    monkeypatch.setattr(analysis, "RESULTS_DIR", tmp_path)
+    assert cli.main(["eval", "agreement", "a", "b", "--split", "dev"]) == 0
+    out = capsys.readouterr().out
+    changed = [i for i in flip if by_id[i].fault != "cpu"]
+    n = len(ids)
+    assert f"a {n}/{n}, b {n - len(changed)}/{n}" in out
+    assert f"right in every run {n - len(changed)}/{n}, wrong in every run 0/{n}" in out
+    assert f"answer differs between runs {len(changed)}/{n}" in out
+    assert cli.main(["eval", "agreement", "a", "nope", "--split", "dev"]) == 0
+    assert "nope: no trials" in capsys.readouterr().out

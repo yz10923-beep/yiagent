@@ -229,3 +229,40 @@ def confusion(split: str, variants: list[str], results_dir: Path | None = None) 
             out.append(f"  {truth:<7}({FAMILY[truth]:<8}) -> {got}")
         out.append("")
     return "\n".join(out).rstrip()
+
+
+def agreement(split: str, variants: list[str], results_dir: Path | None = None) -> str:
+    """Repeated runs of one condition, case by case: how many cases every run gets right,
+    every run gets wrong, and which flip between runs. The flips are the run-to-run noise
+    a difference between two conditions has to clear. Diagnostic only."""
+    labels = eval_run.labels_by_id()
+    ids = eval_run.split_ids(split, labels)
+    runs: dict[str, dict[str, str | None]] = {}
+    for v in variants:
+        path = (results_dir or RESULTS_DIR) / v / split / "trials.jsonl"
+        if not path.exists():
+            return f"{v}: no trials at {path}"
+        runs[v] = {
+            t.case_id: (t.report.fault_type if t.report else None) for t in read_trials(path)
+        }
+    right = {v: sum(runs[v].get(i) == labels[i].fault for i in ids) for v in variants}
+    always = never = 0
+    flips: dict[str, list[str]] = defaultdict(list)
+    for i in ids:
+        answers = [runs[v].get(i) for v in variants]
+        ok = [a == labels[i].fault for a in answers]
+        if all(ok):
+            always += 1
+        elif not any(ok):
+            never += 1
+        if len(set(answers)) > 1:
+            flips[labels[i].fault].append("/".join(a or "none" for a in answers))
+    n = len(ids)
+    out = [
+        f"{len(variants)} runs: " + ", ".join(f"{v} {right[v]}/{n}" for v in variants),
+        f"right in every run {always}/{n}, wrong in every run {never}/{n}, "
+        f"answer differs between runs {sum(len(f) for f in flips.values())}/{n}",
+    ]
+    for fault in sorted(flips):
+        out.append(f"  {fault:<7} {len(flips[fault])} differ: " + ", ".join(flips[fault]))
+    return "\n".join(out)
