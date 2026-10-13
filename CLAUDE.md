@@ -87,8 +87,8 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 
 ## Status (2026-10-11)
 
-**Current stage: S4 started (2026-10-13): fault type. First step: `yi eval fault-signals`
-(free) to measure what each fault does before changing the agent (ROADMAP "S4 plan").**
+**Current stage: S4 (2026-10-13): fault type. Measured what each fault does (`yi eval
+fault-signals`); built prompt v2 and tools v2 as versions; next: Yi's three dev A/B runs.**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -166,12 +166,14 @@ Done in S3 so far (decisions in `docs/ROADMAP.md`, "S3 decisions"):
   systematic confusions: socket -> cpu, code faults -> mem). `yi agent compare` prints
   variants side by side.
 - 504 unit + 22 Elasticsearch tests, one of which runs the VM's commands through the CLI.
-  S4 so far: 506 unit tests.
+  S4 so far: `yi eval fault-signals` and `yi eval confusion` (free, read labels, live in
+  `analysis.py`, never imported by `agent/`); `--prompt v1|v2 --tools v1|v2` (v1 pinned
+  to S3's hashes). 510 unit + 23 Elasticsearch tests.
 
 Not done yet, in order:
 1. **S4: fault type and evidence**, as A/Bs on dev (top-1 no longer separates variants):
-   start from the confusion table in ROADMAP "S3 result". The test split is run once,
-   for the final agent.
+   runs `sonnet-repeat`, `s4-prompt`, `s4-prompt-tools` (SETUP step 10), then decide
+   what to keep. The test split is run once, for the final agent.
 2. S5 OpenRCA Bank + deploy: see ROADMAP. OpenRCA is where root-cause accuracy can
    still discriminate.
 

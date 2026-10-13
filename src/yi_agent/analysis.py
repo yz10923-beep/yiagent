@@ -192,3 +192,40 @@ def fault_signals(
     if summaries:
         lines += ["", "the agent's reasoning where it named the wrong fault:", *summaries]
     return "\n".join(lines)
+
+
+FAMILY = {
+    **dict.fromkeys(("cpu", "mem", "disk", "socket"), "resource"),
+    **dict.fromkeys(("delay", "loss"), "network"),
+    **dict.fromkeys(("f1", "f2", "f3", "f4", "f5"), "code"),
+}
+
+
+def confusion(split: str, variants: list[str], results_dir: Path | None = None) -> str:
+    """Per variant, the true fault against the fault the agent named, and how often it
+    named at least the right family (resource, network, code). Diagnostic only: the
+    graded fault score is the harness's macro-F1."""
+    labels = eval_run.labels_by_id()
+    ids = eval_run.split_ids(split, labels)
+    out: list[str] = []
+    for v in variants:
+        path = (results_dir or RESULTS_DIR) / v / split / "trials.jsonl"
+        if not path.exists():
+            out += [f"{v}: no trials at {path}", ""]
+            continue
+        said = {t.case_id: (t.report.fault_type if t.report else None) for t in read_trials(path)}
+        pairs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        exact = family = 0
+        for i in ids:
+            truth, guess = labels[i].fault, said.get(i)
+            pairs[truth][guess or "none"] += 1
+            exact += guess == truth
+            family += guess is not None and FAMILY.get(guess) == FAMILY[truth]
+        n = len(ids)
+        out.append(f"{v}: fault right {exact}/{n}, family right {family}/{n}")
+        for truth in sorted(pairs):
+            row = sorted(pairs[truth].items(), key=lambda kv: -kv[1])
+            got = ", ".join(f"{g} {k}" for g, k in row)
+            out.append(f"  {truth:<7}({FAMILY[truth]:<8}) -> {got}")
+        out.append("")
+    return "\n".join(out).rstrip()

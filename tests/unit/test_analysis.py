@@ -64,3 +64,29 @@ def test_nothing_the_agent_runs_imports_the_label_reading_analysis() -> None:
     src = Path(__file__).resolve().parents[2] / "src" / "yi_agent" / "agent"
     for f in src.glob("*.py"):
         assert "analysis" not in f.read_text(), f
+
+
+def test_confusion_runs_through_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = {c.id: c for c in read_labels(LABELS_PATH)}
+    ids = read_split(SPLIT_PATH).dev
+    # names the truth on cpu cases, "mem" on everything else, and nothing on one case
+    trials = [
+        Trial(
+            case_id=i,
+            report=Report(case_id=i, fault_type="cpu" if by_id[i].fault == "cpu" else "mem"),
+        )
+        for i in ids[1:]
+    ] + [Trial(case_id=ids[0], report=Report(case_id=ids[0]))]
+    write_trials(trials, tmp_path / "v" / "dev" / "trials.jsonl")
+    monkeypatch.setattr(analysis, "RESULTS_DIR", tmp_path)
+    assert cli.main(["eval", "confusion", "v", "missing", "--split", "dev"]) == 0
+    out = capsys.readouterr().out
+    n = len(ids)
+    resource = sum(analysis.FAMILY[by_id[i].fault] == "resource" for i in ids[1:])
+    exact = sum(by_id[i].fault in ("cpu", "mem") for i in ids[1:])
+    assert f"v: fault right {exact}/{n}, family right {resource}/{n}" in out
+    assert re.search(r"socket \(resource\) -> mem \d+", out)
+    assert "none 1" in out
+    assert "missing: no trials" in out

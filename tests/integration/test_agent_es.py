@@ -463,6 +463,15 @@ def test_the_vm_commands_run_end_to_end_through_the_cli(
     assert "AC@1" in capsys.readouterr().out
     assert cli.main([*argv, "--variant", "blind", "--placebo"]) == 0
     capsys.readouterr()
+    assert cli.main([*argv, "--variant", "s4", "--prompt", "v2", "--tools", "v2"]) == 0
+    assert "AC@1" in capsys.readouterr().out
+    run_json = json.loads((tmp_path / "results" / "s4" / "dev_small" / "run.json").read_text())
+    assert run_json["prompt"] == "v2" and run_json["tools"] == "v2"
+    from yi_agent import analysis
+
+    monkeypatch.setattr(analysis, "RESULTS_DIR", tmp_path / "results")
+    assert cli.main(["eval", "confusion", "top", "s4", "--split", "dev_small"]) == 0
+    assert capsys.readouterr().out.count("fault right") == 2
     assert cli.main(["agent", "compare", "top", "blind", "--group", "all", "re2-tt"]) == 0
     out = capsys.readouterr().out
     assert out.count("\ntop ") == 2 and out.count("\nblind ") == 2  # two groups, two rows
@@ -470,3 +479,21 @@ def test_the_vm_commands_run_end_to_end_through_the_cli(
     # a changed condition is refused with a message, not a traceback
     assert cli.main([*argv, "--variant", "top", "--max-steps", "9"]) == 2
     assert "pass a new --variant" in capsys.readouterr().err
+
+
+def test_tools_v2_count_error_lines_and_filter_to_them(es: Elasticsearch, tmp_path: Path) -> None:
+    label, _, case_dir = loaded(es, tmp_path, "re3ob_cartservice_f1_1")
+    w = read_window(case_dir)
+    tools = CaseTools(CaseIndices(es, label.id, w.sources), w.onset_ms, error_counts=True)
+    try:
+        overview = dispatch(tools, "overview", {})
+        assert "error-looking lines" in overview
+        assert "  cartservice: 6 (0) / 7 (1)" in overview  # the planted exception, after only
+        assert "  alpha: 6 (0) / 6 (0)" in overview
+        only = dispatch(tools, "search_logs", {"errors_only": True, "window": "all"})
+        assert "NullPointerException" in only and "handled request" not in only
+        # tools v1 is unchanged
+        plain = CaseTools(CaseIndices(es, label.id, w.sources), w.onset_ms)
+        assert "  cartservice: 6 / 7" in dispatch(plain, "overview", {})
+    finally:
+        unload_case(es, label.id)

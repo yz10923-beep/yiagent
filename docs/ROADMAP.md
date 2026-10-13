@@ -472,6 +472,68 @@ measurably helps. In order:
    between two identical Haiku runs).
 4. The test split, once, with the final agent.
 
+### S4 step 1: what the faults did (dev, `yi eval fault-signals`, 2026-10-13)
+
+Medians for the true root cause (z = BARO's robust score of the 10 minutes after the
+onset; err = error-looking log lines in the 10 minutes before / after), and how often
+the S3 Sonnet agent named the fault right:
+
+| fault | right | cpu up | mem up | disk up | socket up | latency-90 up | mem down | err logs b/a |
+|---|---|---|---|---|---|---|---|---|
+| cpu | 9/9 | 78 | 18 | 1.5 | 3 | 119 | 0.45 | 0 / 0 |
+| socket | 0/9 | 39 | 34 | 1.5 | **17** | 21 | 0.53 | 0 / 0 |
+| mem | 7/9 | 97 | **4.8e3** | 2 | 4.5 | 469 | 0.24 | 0 / 0 |
+| disk | 6/9 | 65 | 337 | **9.4e9** | 3 | 62 | 0.43 | 0 / 0 |
+| delay | 9/9 | 2.7 | 4.6 | 1.1 | 6 | 40 | 0.6 | 0 / 0 |
+| loss | 0/9 | 5.1 | 7.2 | 1.2 | 7 | **3.8e3** | 0.5 | 0 / 1 |
+| f1 | 0/4 | 109 | 94 | - | 12 | 18 | **-1.6** | 0 / 14 |
+| f3 | 0/9 | 35 | 318 | 0.5 | 10 | 577 | **-5.7** | 0 / 26 |
+| f4 | 0/7 | 13 | 114 | - | 15 | 274 | **-3.5** | 0 / 40 |
+| f5 | 0/3 | -0.2 | 95 | - | 0 | 0.2 | **-1240** | 0 / 14 |
+
+What the measurement says (and what it overturns):
+- **socket -> cpu is right about the cause:** a socket stressor raises cpu (z 39) more
+  than sockets (17), but sockets do rise: on dev every socket case has socket z >= 7.7
+  and every cpu case <= 6. The data separates them; the agent read only the larger move.
+- **Code faults are redeploys, and the agent mistakes the restart for a memory hog**: 17
+  of 23 RE3 cases were called mem. In 20 of the 23, memory falls *below* its pre-onset
+  level at some point (mem down -0.8 to -1420: a fresh process), which a memory
+  stressor almost never does (mem down >= -0.6 in 8 of 9 mem cases), plus new error lines
+  (0 before, 14-40 after) and, in the transcripts, Spring Boot start-up banners. Several
+  of the agent's own summaries mention the restart and still conclude "memory hog". In
+  f1, the agent wrote "no error logs" four times while 14 error lines were there.
+- **f-numbers are partly readable:** the three f4 cases called f5 are adservice throwing
+  NullPointerException ~2,900 times (a wrong return value, null, crashing its callers);
+  the three f5 cases called f1 are emailservice crashing on start with "non-dummy mode
+  not implemented yet" (an escaped exception). The agent reasons from the errors; the
+  definitions it was given are too thin to choose well.
+- **disk <-> mem:** disk stress fills the page cache (mem z 337), and memory stress spills
+  to disk in Train Ticket; the ratio to normal separates them (disk z 5.7e5 to 1.9e10 in
+  disk cases, at most 1.7e3 in mem cases).
+- **loss -> delay (4), mem (3):** loss shows as latency (z 3.8e3) with almost no error
+  spans; whether its tail moves more than its median, as delay's does not, is not
+  measured here (only latency-90 is). The v2 guide states it as a mechanism; the A/B
+  will tell whether it helps.
+
+### S4 step 2: two changes, as versions (the S3 agent stays runnable)
+
+- **prompt v2** (`agent/prompt.py`, `FAULT_GUIDE_V2`): how each fault is injected and
+  what separates the look-alikes above (socket vs cpu, disk vs mem, restart vs memory
+  hog, loss vs delay, and fuller f1-f5 definitions). Mechanisms only, no service or case
+  (tested), and phrased qualitatively, not with thresholds fitted to dev.
+- **tools v2** (`agent/tools.py`, `TOOL_SPECS_V2`): `overview` also counts error-looking
+  log lines per container before / after, and `search_logs` takes `errors_only`. Aimed
+  at "no error logs" when there were 14.
+- `--prompt v1|v2 --tools v1|v2` select them; v1 is byte-identical to S3 (system sha
+  63709d65265a, tool table 9b93a315c6f2, both pinned in tests), and each combination is
+  its own condition in run.json.
+- `yi eval confusion VARIANT...` (free) prints true vs named fault per variant, and
+  how often the agent named at least the right family (resource, network, code): a
+  diagnostic, not a graded score.
+
+Runs (Sonnet 5.5, dev, about $2.40 and 5 minutes each): `sonnet-repeat` (v1/v1, the
+noise floor), `s4-prompt` (v2/v1), `s4-prompt-tools` (v2/v2).
+
 ## Ideas for S2 from S1
 
 - **A metadata-only baseline as a leak detector.** The metric column set differs by case

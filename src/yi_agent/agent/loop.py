@@ -51,6 +51,8 @@ class InfraFailure(Exception):
 class AgentConfig:
     max_steps: int = 25  # model calls per case
     retry: RetryPolicy = field(default_factory=RetryPolicy)
+    system: str = SYSTEM  # a prompt version (agent/prompt.py), fixed for a whole run
+    tools: list[dict[str, Any]] = field(default_factory=lambda: TOOL_SPECS)
 
 
 @dataclass
@@ -112,7 +114,7 @@ async def run_agent(
     with tracer.span("agent.run", "agent", case_id=alert.case_id) as run_span:
         try:
             for step in range(1, config.max_steps + 1):
-                resp = await _call_model(provider, messages, config.retry, tracer, step)
+                resp = await _call_model(provider, messages, config, tracer, step)
                 result.steps = step
                 result.account(resp)
                 messages.append({"role": "assistant", "content": resp.content})
@@ -156,17 +158,19 @@ async def run_agent(
 async def _call_model(
     provider: LLMProvider,
     messages: list[Message],
-    policy: RetryPolicy,
+    config: AgentConfig,
     tracer: Tracer,
     step: int,
 ) -> LLMResponse:
     """One model call. API failures are retried with backoff (a model call has no side
     effects); past the policy's limits they become an InfraFailure."""
-    waited, retry = 0.0, 0
+    policy, waited, retry = config.retry, 0.0, 0
     while True:
         with tracer.span("llm.call", "llm", step=step, attempt=retry + 1) as span:
             try:
-                resp = await provider.complete(system=SYSTEM, messages=messages, tools=TOOL_SPECS)
+                resp = await provider.complete(
+                    system=config.system, messages=messages, tools=config.tools
+                )
             except LLMError as e:
                 span.fail(f"{e.kind}: {e}")
                 retry += 1

@@ -161,6 +161,17 @@ the binding to 0.0.0.0.
    pass a new `--variant`. Results: `evals/results/<variant>/<split>/` (trials, scores,
    trajectories; the full transcripts in `events/`, spans in `traces/`, both git-ignored).
 
+10. **S4 A/B runs (paid, about $2.40 and 5 minutes each on Sonnet 5.5).** One block per
+    step; each prints a line per case as it finishes.
+
+    ```bash
+    uv run yi agent run --split dev --variant sonnet-repeat                          # noise floor
+    uv run yi agent run --split dev --variant s4-prompt --prompt v2                  # + fault guide
+    uv run yi agent run --split dev --variant s4-prompt-tools --prompt v2 --tools v2 # + error counts
+    uv run yi agent compare --split dev sonnet sonnet-repeat s4-prompt s4-prompt-tools
+    uv run yi eval confusion --split dev sonnet sonnet-repeat s4-prompt s4-prompt-tools
+    ```
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

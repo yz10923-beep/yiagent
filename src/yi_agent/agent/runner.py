@@ -25,8 +25,8 @@ from typing import Any
 from elasticsearch import ApiError, Elasticsearch, TransportError
 
 from yi_agent.agent.loop import AgentConfig, AgentResult, InfraFailure, run_agent
-from yi_agent.agent.prompt import SYSTEM_SHA
-from yi_agent.agent.tools import TOOL_SPECS, CaseIndices, CaseTools, dispatch
+from yi_agent.agent.prompt import GUIDES, system_prompt, system_sha
+from yi_agent.agent.tools import TOOLSETS, CaseIndices, CaseTools, dispatch
 from yi_agent.data.alert import make_alert
 from yi_agent.data.es_load import LoadError, ensure_loaded
 from yi_agent.data.rcaeval import CaseLabel
@@ -46,7 +46,13 @@ LOOP_VERSION = 1  # bump when the loop's behaviour changes: it is part of the co
 # chance, something other than the fault's effect points at it.
 PLACEBO_SHIFT_MS = 6 * 60 * 1000
 PLACEBO_HALF_MS = 6 * 60 * 1000
-TOOLS_SHA = hashlib.sha256(json.dumps(TOOL_SPECS, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def tools_sha(version: str = "v1") -> str:
+    return hashlib.sha256(json.dumps(TOOLSETS[version], sort_keys=True).encode()).hexdigest()[:12]
+
+
+TOOLS_SHA = tools_sha("v1")
 
 type Progress = Callable[[str], None]
 
@@ -57,16 +63,34 @@ class Condition:
     effort: str | None
     max_steps: int
     placebo: bool = False
+    prompt: str = "v1"  # agent/prompt.py GUIDES
+    tools: str = "v1"  # agent/tools.py TOOLSETS
+
+    def __post_init__(self) -> None:
+        if self.prompt not in GUIDES or self.tools not in TOOLSETS:
+            raise ValueError(f"unknown prompt {self.prompt!r} or tools {self.tools!r}")
+
+    def config(self) -> AgentConfig:
+        return AgentConfig(
+            max_steps=self.max_steps,
+            system=system_prompt(self.prompt),
+            tools=TOOLSETS[self.tools],
+        )
 
     def record(self) -> dict[str, Any]:
         rec: dict[str, Any] = {
             "model": self.model,
             "effort": self.effort,
             "max_steps": self.max_steps,
-            "system_sha": SYSTEM_SHA,
-            "tools_sha": TOOLS_SHA,
+            "system_sha": system_sha(self.prompt),
+            "tools_sha": tools_sha(self.tools),
             "loop_version": LOOP_VERSION,
         }
+        # Versions are recorded only when not the S3 ones, so S3's run.json files match.
+        if self.prompt != "v1":
+            rec["prompt"] = self.prompt
+        if self.tools != "v1":
+            rec["tools"] = self.tools
         if self.placebo:  # only when set, so earlier run.json files still match
             rec["placebo"] = {"shift_ms": PLACEBO_SHIFT_MS, "half_window_ms": PLACEBO_HALF_MS}
         return rec
@@ -133,7 +157,7 @@ async def run_split(
     trials_path = run_dir / "trials.jsonl"
     done = {t.case_id: t for t in read_trials(trials_path)} if trials_path.exists() else {}
     done = {k: t for k, t in done.items() if t.status == "ok"}  # retry infra failures
-    config = AgentConfig(max_steps=cond.max_steps)
+    config = cond.config()
     todo = [(n, i) for n, i in enumerate(chosen, 1) if i not in done]
     gate = asyncio.Semaphore(max(1, parallel))
 
@@ -142,7 +166,7 @@ async def run_split(
         async with gate:
             say(f"[{n}/{len(chosen)}] {case_id} ...")
             trial, traj = await _run_case(
-                label, data_dir, es, make_provider, config, run_dir, say, cond.placebo
+                label, data_dir, es, make_provider, config, run_dir, say, cond
             )
         # One event loop: these writes never interleave, and each leaves a valid file.
         done[case_id] = trial
@@ -169,18 +193,19 @@ async def _run_case(
     config: AgentConfig,
     run_dir: Path,
     say: Progress,
-    placebo: bool = False,
+    cond: Condition,
 ) -> tuple[Trial, dict[str, Any]]:
     case_dir = data_dir / label.name
     window = read_window(case_dir)
     alert = make_alert(label, window)  # the case id, the system and the times; no label
+    errs = cond.tools == "v2"
     indices = CaseIndices(es, label.id, window.sources)
-    tools = CaseTools(indices, window.onset_ms)
-    if placebo:
+    tools = CaseTools(indices, window.onset_ms, error_counts=errs)
+    if cond.placebo:
         fake = window.onset_ms - PLACEBO_SHIFT_MS
         alert = alert.model_copy(update={"onset_ms": fake, "end_ms": window.onset_ms})
         indices = CaseIndices(es, label.id, window.sources, ceiling_ms=window.onset_ms)
-        tools = CaseTools(indices, fake, half_window_ms=PLACEBO_HALF_MS)
+        tools = CaseTools(indices, fake, half_window_ms=PLACEBO_HALF_MS, error_counts=errs)
     result = AgentResult(case_id=label.id)
     try:
         try:
@@ -197,7 +222,11 @@ async def _run_case(
     finally:
         write_json(
             run_dir / "events" / f"{label.id}.json",
-            {"case_id": label.id, "system_sha": SYSTEM_SHA, "messages": result.messages},
+            {
+                "case_id": label.id,
+                "system_sha": system_sha(cond.prompt),
+                "messages": result.messages,
+            },
         )
     # No report is the agent's failure and scores nothing; a trial without one would be
     # read as an infra failure and dropped from the scores.

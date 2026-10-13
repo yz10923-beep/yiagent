@@ -193,11 +193,19 @@ def test_parse_report_requires_a_service_and_a_known_fault() -> None:
     assert parse_report("c1", {**GOOD, "case_id": "c999"}).case_id == "c1"  # never the model's
 
 
-def test_the_prompt_and_tools_name_no_service_and_no_case() -> None:
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_the_prompt_and_tools_name_no_service_and_no_case(version: str) -> None:
     """The same text goes to every case; a service name in it would point at an answer.
-    Fault names are the answer vocabulary, so they are allowed."""
+    Fault names are the answer vocabulary, so they are allowed. Every version is checked."""
+    from yi_agent.agent.tools import TOOLSETS
+
     labels = read_labels(LABELS_PATH)
-    blob = prompt.SYSTEM + json.dumps(TOOL_SPECS) + prompt.NUDGE + prompt.budget_notice(2)
+    blob = (
+        prompt.system_prompt(version)
+        + json.dumps(TOOLSETS[version])
+        + prompt.NUDGE
+        + prompt.budget_notice(2)
+    )
     found = {
         token
         for c in labels
@@ -228,3 +236,36 @@ def test_a_condition_without_placebo_records_what_earlier_runs_recorded() -> Non
     plain = Condition(model="m", effort="high", max_steps=25).record()
     assert set(plain) == {"model", "effort", "max_steps", "system_sha", "tools_sha", "loop_version"}
     assert "placebo" in Condition(model="m", effort="high", max_steps=25, placebo=True).record()
+
+
+def test_v1_is_exactly_what_s3_ran_and_v2_is_a_different_condition() -> None:
+    from yi_agent.agent.runner import TOOLS_SHA, Condition, tools_sha
+    from yi_agent.agent.tools import TOOL_SPECS_V2
+
+    assert prompt.system_sha("v1") == "63709d65265a"  # the sha in S3's transcripts
+    assert TOOLS_SHA == "9b93a315c6f2"  # the tool table S3 ran with
+    assert prompt.SYSTEM == prompt.system_prompt("v1")
+    v1 = Condition(model="m", effort="high", max_steps=25)
+    v2 = Condition(model="m", effort="high", max_steps=25, prompt="v2", tools="v2")
+    assert v1.record()["tools_sha"] == TOOLS_SHA and "prompt" not in v1.record()
+    assert v2.record()["prompt"] == "v2" and v2.record()["tools"] == "v2"
+    assert v2.record()["system_sha"] != v1.record()["system_sha"]
+    assert v2.record()["tools_sha"] == tools_sha("v2") != TOOLS_SHA
+    assert v2.config().system == prompt.system_prompt("v2")
+    assert v2.config().tools is TOOL_SPECS_V2
+    logs = next(t for t in TOOL_SPECS_V2 if t["name"] == "search_logs")
+    assert "errors_only" in logs["input_schema"]["properties"]
+    v1_logs = next(t for t in TOOL_SPECS if t["name"] == "search_logs")
+    assert "errors_only" not in v1_logs["input_schema"]["properties"]  # v1 untouched
+    with pytest.raises(ValueError, match="unknown prompt"):
+        Condition(model="m", effort="high", max_steps=25, prompt="v9")
+
+
+async def test_the_loop_sends_the_configured_prompt_and_tools() -> None:
+    from yi_agent.agent.tools import TOOL_SPECS_V2
+
+    p = ScriptedProvider([submit(GOOD)])
+    cfg = AgentConfig(system=prompt.system_prompt("v2"), tools=TOOL_SPECS_V2)
+    await run_agent(p, ALERT, FakeTools(), cfg)
+    assert p.requests[0].system == prompt.system_prompt("v2")
+    assert p.requests[0].tools is TOOL_SPECS_V2

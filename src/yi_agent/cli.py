@@ -16,7 +16,9 @@ from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import Elasticsearch
 
 from yi_agent.agent.policies import POLICIES
+from yi_agent.agent.prompt import GUIDES
 from yi_agent.agent.runner import Condition, ConditionChanged, compare, run_split
+from yi_agent.agent.tools import TOOLSETS
 from yi_agent.config import ConfigError, Settings, load_settings
 from yi_agent.data.alert import make_alert
 from yi_agent.data.check import AuditResult, audit_case, check_download, inspect_case
@@ -212,6 +214,13 @@ def cmd_eval_fault_signals(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval_confusion(settings: Settings, args: argparse.Namespace) -> int:
+    from yi_agent.analysis import confusion
+
+    print(confusion(args.split, args.variants))
+    return 0
+
+
 def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
     print(eval_run.metric_kinds(settings.data_dir, args.split))
     return 0
@@ -219,7 +228,12 @@ def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
 
 def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
     cond = Condition(
-        model=args.model, effort=args.effort, max_steps=args.max_steps, placebo=args.placebo
+        model=args.model,
+        effort=args.effort,
+        max_steps=args.max_steps,
+        placebo=args.placebo,
+        prompt=args.prompt,
+        tools=args.tools,
     )
     key = settings.anthropic_api_key
 
@@ -328,6 +342,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
     c.add_argument("--variant", help="also show what this run's agent said the fault was")
     c.set_defaults(fn=cmd_eval_fault_signals)
+    c = ev.add_parser("confusion", help="true vs named fault per variant (free; reads labels)")
+    c.add_argument("variants", nargs="+")
+    c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
+    c.set_defaults(fn=cmd_eval_confusion)
     c = ev.add_parser("metric-kinds", help="metric families each system exports")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")
     c.set_defaults(fn=cmd_eval_metric_kinds)
@@ -352,6 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="control: a false onset 6 min early, nothing visible from the real one on",
     )
+    c.add_argument("--prompt", choices=sorted(GUIDES), default="v1", help="prompt version")
+    c.add_argument("--tools", choices=sorted(TOOLSETS), default="v1", help="tool version")
     c.set_defaults(fn=cmd_agent_run)
     c = ag.add_parser("compare", help="variants side by side, from their scores (free)")
     c.add_argument("variants", nargs="+", help="results directories, e.g. baro agent")

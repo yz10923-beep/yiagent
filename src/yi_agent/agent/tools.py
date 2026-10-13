@@ -11,6 +11,7 @@ text, a span id, a metric name) is printed exactly as the grader will look it up
 
 from __future__ import annotations
 
+import copy
 import inspect
 import math
 from collections.abc import Callable
@@ -103,6 +104,25 @@ def _service_filter(field: str, service: str | None) -> list[dict[str, Any]]:
     ]
 
 
+# Error-looking log lines (S4): a word match on the analyzed text, or a substring of the
+# exact line, so "java.lang.NullPointerException" (one token to the analyzer) counts.
+ERROR_LOG: dict[str, Any] = {
+    "bool": {
+        "should": [
+            {"match": {"message": "error exception traceback fatal panic"}},
+            {
+                "regexp": {
+                    "message.raw": {
+                        "value": ".*(exception|error|traceback|fatal|panic).*",
+                        "case_insensitive": True,
+                    }
+                }
+            },
+        ],
+        "minimum_should_match": 1,
+    }
+}
+
 LONG_LINE: dict[str, Any] = {
     "bool": {
         "filter": [{"exists": {"field": "message"}}],
@@ -141,6 +161,7 @@ class CaseTools:
     data: CaseIndices
     onset_ms: int
     half_window_ms: int = HALF_WINDOW_MS
+    error_counts: bool = False  # tools v2: overview counts error-looking log lines too
 
     def _w(self, which: str) -> dict[str, Any]:
         return _window(self.onset_ms, which, self.half_window_ms)
@@ -168,14 +189,28 @@ class CaseTools:
             "after": {"filter": self._w("after")},
         }
         if "logs" in self.data.sources:
+            err = {"errors": {"filter": ERROR_LOG}} if self.error_counts else {}
+            sides = {k: {**v, "aggs": err} if err else v for k, v in split.items()}
             r = self.data.search(
                 "logs",
                 size=0,
-                aggs={"c": {"terms": {"field": "container_name", "size": 500}, "aggs": split}},
+                aggs={"c": {"terms": {"field": "container_name", "size": 500}, "aggs": sides}},
             )
-            out.append("logs: lines per container, before / after the onset")
+            if self.error_counts:
+                out.append(
+                    "logs: lines (error-looking lines) per container, before / after the onset"
+                )
+            else:
+                out.append("logs: lines per container, before / after the onset")
             for b in r["aggregations"]["c"]["buckets"]:
-                out.append(f"  {b['key']}: {b['before']['doc_count']} / {b['after']['doc_count']}")
+                bf, af = b["before"], b["after"]
+                if self.error_counts:
+                    out.append(
+                        f"  {b['key']}: {bf['doc_count']} ({bf['errors']['doc_count']}) / "
+                        f"{af['doc_count']} ({af['errors']['doc_count']})"
+                    )
+                else:
+                    out.append(f"  {b['key']}: {bf['doc_count']} / {af['doc_count']}")
         if "traces" in self.data.sources:
             err = {"errors": {"filter": ERROR_STATUS}}
             r = self.data.search(
@@ -316,11 +351,12 @@ class CaseTools:
         service: str | None = None,
         window: str = "after",
         limit: int = 15,
+        errors_only: bool = False,
     ) -> str:
         """Log lines grouped by exact text, most frequent first, each with how often it
         appeared before the onset (a line that is new after the onset is a lead)."""
         limit = max(1, min(limit, 50))
-        must: list[dict[str, Any]] = []
+        must: list[dict[str, Any]] = [ERROR_LOG] if errors_only else []
         if query:
             must.append({"simple_query_string": {"query": query, "fields": ["message"]}})
         if contains:
@@ -708,6 +744,29 @@ TOOL_SPECS: list[dict[str, Any]] = [
         ["root_causes", "fault_type", "evidence", "summary"],
     ),
 ]
+
+
+def _tool_specs_v2() -> list[dict[str, Any]]:
+    """Tools v2 (S4): overview also counts error-looking log lines per container, and
+    search_logs can keep only those (errors_only)."""
+    specs = copy.deepcopy(TOOL_SPECS)
+    by_name = {t["name"]: t for t in specs}
+    by_name["overview"]["description"] = (
+        "Start here. Lists the services seen in metrics (with their metric families), log "
+        "lines and error-looking log lines per container, and spans (and error spans) per "
+        "service, before and after the onset."
+    )
+    logs = by_name["search_logs"]
+    logs["description"] += (
+        " errors_only: keep only error-looking lines (exception, error, traceback, fatal, "
+        "panic, in any case or inside a dotted name)."
+    )
+    logs["input_schema"]["properties"]["errors_only"] = {"type": "boolean"}
+    return specs
+
+
+TOOL_SPECS_V2 = _tool_specs_v2()
+TOOLSETS = {"v1": TOOL_SPECS, "v2": TOOL_SPECS_V2}
 
 
 def dispatch(tools: CaseTools, name: str, args: dict[str, Any]) -> str:
