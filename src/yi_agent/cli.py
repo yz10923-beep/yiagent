@@ -305,6 +305,41 @@ def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_bank_run(settings: Settings, args: argparse.Namespace) -> int:
+    from yi_agent.agent.bank import BankCondition, run_bank_split
+
+    cond = BankCondition(
+        model=args.model, effort=args.effort, max_steps=args.max_steps, prompt=args.prompt
+    )
+    key = settings.anthropic_api_key
+
+    def provider() -> LLMProvider:
+        return AnthropicProvider(
+            model=cond.model,
+            max_tokens=32_000,
+            effort=cond.effort,
+            api_key=key.get_secret_value() if key else None,
+        )
+
+    print(
+        asyncio.run(
+            run_bank_split(
+                args.split,
+                settings.data_dir,
+                _es(settings),
+                provider,
+                cond,
+                args.variant,
+                limit=args.limit,
+                parallel=args.parallel,
+                progress=_progress,
+                unload_after=args.unload_after,
+            )
+        )
+    )
+    return 0
+
+
 def cmd_agent_compare(settings: Settings, args: argparse.Namespace) -> int:
     for group in args.group:
         print(compare(args.split, args.variants, group))
@@ -609,6 +644,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument("--tools", choices=sorted(TOOLSETS), default="v1", help="tool version")
     c.set_defaults(fn=cmd_agent_run)
+    c = ag.add_parser("bank-run", help="the agent on OpenRCA Bank queries (resumable; costs money)")
+    c.add_argument("--split", choices=("dev", "test", "all"), default="dev")
+    c.add_argument("--variant", required=True, help="results directory name (one condition)")
+    c.add_argument("--limit", type=int, help="only the first N queries (a smoke test)")
+    c.add_argument("--model", default=DEFAULT_MODEL)
+    c.add_argument("--effort", default="high")
+    c.add_argument("--max-steps", type=int, default=25)
+    c.add_argument("--prompt", default="bank-v1", help="Bank prompt version")
+    c.add_argument("--parallel", type=int, default=3)
+    c.add_argument("--unload-after", action="store_true", help="unload each query after its trial")
+    c.set_defaults(fn=cmd_agent_bank_run)
     c = ag.add_parser("compare", help="variants side by side, from their scores (free)")
     c.add_argument("variants", nargs="+", help="results directories, e.g. baro agent")
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev_small")

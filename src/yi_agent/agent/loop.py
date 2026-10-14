@@ -27,6 +27,7 @@ from yi_agent.agent.prompt import NUDGE, SYSTEM, budget_notice, first_message
 from yi_agent.agent.tools import ALL_FAULTS, SUBMIT, TOOL_SPECS, ToolError, ToolInfraError
 from yi_agent.context import request_tokens
 from yi_agent.data.alert import Alert
+from yi_agent.eval.bank import BankReport
 from yi_agent.eval.report import Report
 from yi_agent.llm.pricing import cost_usd
 from yi_agent.llm.retry import RetryPolicy
@@ -37,6 +38,8 @@ Outcome = Literal["submitted", "no_report", "budget", "refusal"]
 # A telemetry tool: (name, input) -> text. Raises ToolError (the model sees it) or
 # ToolInfraError (the run stops as an infra failure).
 type RunTool = Callable[[str, dict[str, Any]], str]
+# submit_report's input as the benchmark's report; ValueError says what to fix.
+type ParseReport = Callable[[str, dict[str, Any]], Report | BankReport]
 
 
 class InfraFailure(Exception):
@@ -53,13 +56,14 @@ class AgentConfig:
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     system: str = SYSTEM  # a prompt version (agent/prompt.py), fixed for a whole run
     tools: list[dict[str, Any]] = field(default_factory=lambda: TOOL_SPECS)
+    parse: ParseReport = field(default=lambda case_id, args: parse_report(case_id, args))
 
 
 @dataclass
 class AgentResult:
     case_id: str
     outcome: Outcome = "no_report"
-    report: Report | None = None
+    report: Report | BankReport | None = None
     steps: int = 0
     tool_calls: int = 0
     tool_errors: int = 0
@@ -132,7 +136,8 @@ async def run_agent(
                     messages.append({"role": "user", "content": [{"type": "text", "text": NUDGE}]})
                     continue
                 blocks = [
-                    await _run_call(c, alert.case_id, run_tool, result, tracer) for c in calls
+                    await _run_call(c, alert.case_id, run_tool, result, tracer, config.parse)
+                    for c in calls
                 ]
                 if result.report is not None:
                     result.outcome = "submitted"
@@ -193,7 +198,12 @@ async def _call_model(
 
 
 async def _run_call(
-    call: ToolCall, case_id: str, run_tool: RunTool, result: AgentResult, tracer: Tracer
+    call: ToolCall,
+    case_id: str,
+    run_tool: RunTool,
+    result: AgentResult,
+    tracer: Tracer,
+    parse: ParseReport,
 ) -> dict[str, Any]:
     """One tool call as a tool_result block. A bad call is the model's to fix (it sees
     the error); Elasticsearch failing ends the run as an infra failure."""
@@ -201,7 +211,7 @@ async def _run_call(
     with tracer.span(f"tool.{call.name}", "tool", input=json.dumps(call.input)) as span:
         try:
             if call.name == SUBMIT:
-                result.report = parse_report(case_id, call.input)
+                result.report = parse(case_id, call.input)
                 text = "Report received. The investigation is over."
             else:
                 text = await asyncio.to_thread(run_tool, call.name, call.input)

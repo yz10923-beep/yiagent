@@ -572,6 +572,13 @@ The honest framing: most of the step from BARO (0.25) to the agent (1.00) is an 
 reading BARO-style statistics, logs and traces together (one call: 0.91); the loop adds
 the last 9 points of localization and 7.5 fault types, where the first look misleads.
 
+**On test (283 cases, once, VM 2026-10-14; summary v2 frozen):** one call AC@1 **0.93**
+(263/283), AC@3 0.98, Avg@5 0.97; fault type **164/283**, F1 RE2 0.63, RE3 0.42; on
+target 0.86; $0.026 and 8 s a case ($7.38). The agent on the same cases: **0.98
+(277/283), 189/283**, F1 0.75 / 0.40, $0.041. The dev picture holds: 14 of one call's 20
+misses name `session-db` (Sock Shop: RE2-SS 0.88, RE3-SS 0.74); the agent is 25 fault
+types ahead (dev: 7.5 of 77, the same ~9% of cases), all of it on RE2 (RE3 F1 is equal).
+
 
 ## S5 decisions (made 2026-10-13; Yi: Bank yes, data for private evaluation only)
 
@@ -663,6 +670,29 @@ the last 9 points of localization and 7.5 fault types, where the first look misl
   reason, ~3/30 time. The same on the VM (test).
 - `data/openrca.py` and `evals/split_bank.json` are now in the harness hash (eval/*.py
   already was), so the hash changed: Yi re-approves after reviewing the diff.
+
+### S5 step 3: the agent on Bank (built 2026-10-14)
+
+- **The same loop and tools (v2, the S4 final agent's), a Bank prompt, a Bank alert, a
+  Bank report** (`agent/bank.py`, `yi agent bank-run`). The query gives no onset, so the
+  tools take the window's start as theirs: "before" is the 30-minute baseline, "after"
+  the window, t+Ns seconds from the window's start; `metric_series` pins the minute.
+- **Prompt (`bank-v1`):** the task (per failure: the minute it began in UTC+8, graded
+  within a minute; a component and a reason from OpenRCA's own candidate lists, as its
+  agent is given them), what the components are in the data, and how each of the 8
+  reasons shows (from the KPI names seen in `inspect`; written before any Bank run, the
+  same for every query).
+- **Alert:** what the query states (window, number of failures, what it asks), the hour
+  of telemetry and any source with nothing in it, and t+0s; never the answer (a test
+  checks every fixture query's components, reasons and times are absent).
+- **Report:** one entry per failure; components and reasons are enums in the tool's
+  schema; a reply with the wrong number of entries, a malformed time or one outside the
+  window goes back to the model (checks that use only what the alert said).
+- **Not graded on Bank:** evidence grounding (OpenRCA does not grade it; the citations
+  are kept for reading).
+- Results beside the download, graded by OpenRCA's evaluate(), printed beside
+  Microsoft's archived run on the same queries (dev: strict 0.12, mean 0.22; random
+  0.06 / 0.17).
 
 ## S5 plan
 

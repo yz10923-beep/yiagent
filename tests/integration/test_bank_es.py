@@ -3,9 +3,12 @@ through `yi data bank load`, as on the VM. Run with `make es-test`."""
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from elasticsearch import Elasticsearch
@@ -54,6 +57,98 @@ def test_bank_cases_load_with_every_document_and_are_reused(
         assert f"{len(ids)} of {len(ids)} cases were already loaded" in capsys.readouterr().out
         assert cli.main(["data", "bank", "load", ids[0]]) == 0  # without --keep: unloaded
         assert not es.indices.exists(index=index_name(ids[0], "logs"))
+    finally:
+        for i in ids:
+            unload_case(es, i)
+
+
+class BankInvestigator:
+    """A stand-in model: one telemetry call, then a report built from the alert alone
+    (the window's start, the stated number of failures), through the real loop and tools."""
+
+    def __init__(self, **_: object) -> None:
+        self.model = "fake-bank-investigator"
+        self.calls = 0
+
+    async def complete(
+        self, *, system: str, messages: list[Any], tools: list[Any], on_text: Any = None
+    ) -> Any:
+        from tests.fakes import tool_response
+
+        text = messages[0]["content"][0]["text"]
+        self.calls += 1
+        if len(messages) == 1:
+            resp = tool_response(("t1", "metric_changes", {"limit": 5}))
+        else:
+            assert "metric" in json.dumps(messages[-1]["content"])  # the tool answered
+            start = re.search(r"Between (\S+ \S+) and", text)
+            assert start
+            n = 1 if "one failure" in text else int(re.search(r"(\d+) failures", text)[1])  # type: ignore[index]
+            report = {
+                "failures": [
+                    {"time": start[1], "component": "Tomcat01", "reason": "high CPU usage"}
+                ]
+                * n,
+                "evidence": [],
+                "summary": "scripted",
+            }
+            resp = tool_response(("t2", "submit_report", report))
+        return resp.model_copy(update={"model": self.model})
+
+
+def test_the_bank_agent_runs_end_to_end_through_the_cli(
+    es: Elasticsearch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from yi_agent import cli
+    from yi_agent.eval import harness
+
+    data_dir = tmp_path / "data"
+    fx = make_bank(openrca.raw_dir(data_dir))
+    monkeypatch.setenv("YI_DATA_DIR", str(data_dir))
+    _use_fixture(fx, monkeypatch, tmp_path)
+    approval = tmp_path / "harness.sha256"
+    approval.write_text(harness.harness_sha() + "\n")
+    monkeypatch.setattr(harness, "APPROVAL_FILE", approval)
+    monkeypatch.setattr(cli, "AnthropicProvider", BankInvestigator)
+    ids = [q.id for q in _labels(fx)]
+    for i in ids:
+        unload_case(es, i)
+    try:
+        assert cli.main(["data", "bank", "check"]) == 0
+        assert cli.main(["data", "bank", "cut"]) == 0
+        capsys.readouterr()
+        argv = ["agent", "bank-run", "--split", "all", "--variant", "bank-smoke"]
+        assert cli.main([*argv, "--limit", "2"]) == 0
+        assert "partial run: 2 of 6" in capsys.readouterr().out
+        assert cli.main(argv) == 0  # resumes, then scores with OpenRCA's grader
+        out = capsys.readouterr().out
+        assert "strict" in out and "outcomes {'submitted': 6}" in out
+        row = next(line for line in out.splitlines() if line.startswith("all "))
+        assert 0.0 < float(row.split()[3]) < 1.0  # mean: right on Tomcat01/cpu, wrong elsewhere
+        run_dir = openrca.raw_dir(data_dir) / "results" / "bank-smoke" / "all"
+        assert json.loads((run_dir / "run.json").read_text())["benchmark"] == "openrca-bank"
+        events = json.loads(next((run_dir / "events").iterdir()).read_text())
+        first = events["messages"][0]["content"][0]["text"]
+        assert "banking platform" in first and "t+0s (the onset)" in first
+        assert cli.main([*argv, "--max-steps", "9"]) == 2  # another condition: refused
+        assert (
+            cli.main(
+                [
+                    "agent",
+                    "bank-run",
+                    "--split",
+                    "all",
+                    "--variant",
+                    "bank-unload",
+                    "--unload-after",
+                ]
+            )
+            == 0
+        )
+        assert not any(es.indices.exists(index=index_name(i, "traces")) for i in ids)
     finally:
         for i in ids:
             unload_case(es, i)

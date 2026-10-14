@@ -239,6 +239,17 @@ the binding to 0.0.0.0.
     uv run yi eval confusion --split dev one-call-dev one-call-dev-2 2>&1 | tee -a ~/one-call-compare.txt
     ```
 
+15. **The agent on Bank (S5 step 3; paid).** The dev queries must be loaded (step 12).
+    A smoke on 3 queries first (about $0.50, 5 minutes), then all 34 dev queries:
+
+    ```bash
+    uv run yi agent bank-run --split dev --variant bank-smoke --limit 3 2>&1 | tee ~/bank-smoke.txt
+    uv run yi agent bank-run --split dev --variant bank-v1 2>&1 | tee ~/bank-dev.txt
+    ```
+
+    Each query prints one line (steps, cost, what was asked, truth, answer, score). More
+    than 5 minutes without a new line means a stuck call; rerunning resumes.
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

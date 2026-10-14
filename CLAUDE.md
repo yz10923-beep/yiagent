@@ -97,8 +97,9 @@ strict 0.16 on test), built; the harness hash changed (Bank files added): Yi re-
 (SETUP step 13; done, replay 136/136 on the VM). S4 addendum, the one-call baseline
 (`--mode one-call`, `agent/summary.py`): on dev one call scores top-1 0.91 and fault type
 38.5/77 against the agent's 1.00 and 46.0, so by the pre-set rule the loop earns its
-cost (ROADMAP "S4 addendum"). Bank dev loaded (34 cases). Next: S5 step 3, the agent on
-Bank. Plan: ROADMAP "S5 plan".**
+cost (ROADMAP "S4 addendum"); on test one call 0.93 / 164 against the agent's 0.98 / 189.
+Bank dev loaded (34 cases). S5 step 3, the agent on Bank (`agent/bank.py`, `yi agent
+bank-run`), built; next: its 3-query smoke, then dev (SETUP step 15).**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -278,7 +279,8 @@ src/yi_agent/
   cli.py      `yi data ...`, `yi eval ...`, `yi agent run`
   agent/      loop (the ~200 lines), tools (read-only, one case), prompt, runner (split ->
               trials, resumable, one condition per variant), summary (the one-call
-              baseline's fixed summary of a case)
+              baseline's fixed summary of a case), bank (the agent on OpenRCA Bank:
+              prompt, alert, report, runner)
   analysis.py fault-signals: what each fault did to its root cause (reads labels; S4)
   data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
               openrca (Bank: queries, labels, split, fetch, check, cut into case dirs),

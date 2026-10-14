@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from elasticsearch import ApiError, Elasticsearch, TransportError
 
@@ -137,7 +137,11 @@ class ConditionChanged(Exception):
     pass
 
 
-def _check_condition(run_dir: Path, cond: Condition) -> None:
+class Recorded(Protocol):
+    def record(self) -> dict[str, Any]: ...
+
+
+def _check_condition(run_dir: Path, cond: Recorded) -> None:
     path = run_dir / "run.json"
     want = cond.record()
     if path.exists():
@@ -289,6 +293,7 @@ async def _run_case(
     # No report is the agent's failure and scores nothing; a trial without one would be
     # read as an infra failure and dropped from the scores.
     report = result.report or Report(case_id=label.id, summary=f"no report: {result.outcome}")
+    assert isinstance(report, Report)  # this runner's config parses RCAEval reports
     return Trial(case_id=label.id, report=report), trajectory(result)
 
 
