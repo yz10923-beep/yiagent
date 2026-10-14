@@ -616,7 +616,8 @@ failed.
   Results go under `<data_dir>/openrca/results`, never the repo.
 - **Replay of Microsoft's archived RCA-agent run** (Claude 3.5 Sonnet, `agent-Bank.csv`,
   pinned): every recorded score reproduced through our labels and report format,
-  **136/136** (checked in the container from the two small files and the archive; 7 rows
+  **136/136** (on the VM after Yi re-approved the harness, 2026-10-14, and in the
+  container from the two small files and the archive; 7 rows
   differ only by `evaluate()`'s 2-decimal rounding). Their run: **strict 0.15 (20/136),
   mean 0.23** on all queries; **test (102): strict 0.16, mean 0.23**; strongest on high
   CPU (strict 0.29) and memory (0.36), weakest on network latency (0.07), packet loss
@@ -624,7 +625,7 @@ failed.
 - **Selftest on the real labels:** oracle 1.00 / 1.00 (strict / mean), empty 0 / 0,
   wrong 0 / 0, random (the right number of failures, random component, reason and
   minute) test 0.05 / 0.11, dev 0.06 / 0.17; chance per field is 1/14 component, 1/8
-  reason, ~3/30 time.
+  reason, ~3/30 time. The same on the VM (test).
 - `data/openrca.py` and `evals/split_bank.json` are now in the harness hash (eval/*.py
   already was), so the hash changed: Yi re-approves after reviewing the diff.
 
