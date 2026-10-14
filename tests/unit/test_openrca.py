@@ -14,7 +14,7 @@ import pytest
 from tests.openrca_fixture import BIG_ID, BankFixture, make_bank
 from yi_agent.data import openrca
 from yi_agent.data.openrca import BankQuery, local_ms, local_str, parse_window
-from yi_agent.data.telemetry import FileStats, iter_docs, pick_time_column
+from yi_agent.data.telemetry import FileStats, TelemetryError, iter_docs, pick_time_column
 
 SPLIT_SHA256 = "7a08c564ebaa154c30ba58da1b14ef28b3cba585b62de46e3966aa6b7c544bf9"
 
@@ -206,6 +206,10 @@ def test_the_cut_keeps_rcaeval_column_names_ids_and_text_intact(
     }
     # 2021-03-05 00:00 is recorded twice (20.5 and 30.5) and only one window holds it
     assert report.duplicate_metric_cells == 1
+    assert report.units["2021_03_04/trace/trace_span.csv"] == "ms"
+    assert report.units["2021_03_05/trace/trace_span.csv"] == "s"  # still cut, in ms
+    assert report.units["2021_03_05/log/log_service.csv"] == "s"
+    assert report.empty() == {}
     q = next(q for q in qs if local_str(q.start_ms) == "2021-03-05 00:00:00")
     row = pq.read_table(out / q.id / "metrics.parquet").to_pylist()
     first = next(r for r in row if r["time"] * 1000 == q.start_ms)
@@ -267,6 +271,15 @@ def test_an_interrupted_cut_leaves_the_last_complete_one(
     assert not (tmp_path / "cases.partial").exists()
 
 
+def test_a_file_in_two_time_units_stops_the_cut(tmp_path: Path) -> None:
+    fx = make_bank(tmp_path / "openrca")
+    path = fx.root / "Bank" / "telemetry" / "2021_03_04" / "trace" / "trace_span.csv"
+    with path.open("a") as f:
+        f.write("1614823920,dockerB2,a,b,c,1\n")  # seconds, in a file of ms
+    with pytest.raises(TelemetryError, match="more than one unit"):
+        openrca.cut(fx.root, tmp_path / "cases", _labels(fx))
+
+
 def test_span_containment_tells_ms_durations_from_us(
     cut: tuple[Path, list[BankQuery], openrca.CutReport],
 ) -> None:
@@ -322,8 +335,12 @@ def test_the_bank_commands_run_through_the_cli(
     assert cli.main(["data", "bank", "cut"]) == 0
     out = capsys.readouterr().out
     assert "cut 6 cases" in out and "malformed lines skipped: 2" in out
+    assert "trace/trace_span.csv: ms x1" in out and "trace/trace_span.csv: s x1" in out
+    assert "WARNING" not in out
     assert cli.main(["data", "bank", "inspect"]) == 0
     out = capsys.readouterr().out
     assert "100% nest if durations are ms" in out and "time column: startTime, unit ms" in out
+    assert "cases with none: 0" in out and "(UTC+8), baseline from 2021-03-0" in out
+    assert "inject_time" not in out
     assert cli.main(["data", "bank", "audit", "--split", "all"]) == 0
     assert "audited 6 cases" in capsys.readouterr().out

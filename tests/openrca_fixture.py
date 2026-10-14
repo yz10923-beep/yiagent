@@ -5,7 +5,8 @@ queries that exercise what the real ones do: a window ending at midnight with no
 date, the same window asked twice, a window whose baseline lies in the previous day's
 files, and a window with two failures whose scoring points are not in time order. The
 files carry the hazards the cut must handle: a span id past int64, a quoted log line
-with a comma and a newline, a malformed line, and a metric cell recorded twice."""
+with a comma and a newline, a malformed line, a metric cell recorded twice, and one
+day's spans timed in seconds where the other's are in ms (as in the real download)."""
 
 from __future__ import annotations
 
@@ -98,6 +99,13 @@ class BankFixture:
         }
 
 
+SECONDS_TRACE_DAYS = ("2021_03_05",)  # as Bank's 2021-03-23..25: span times in seconds
+
+
+def span_time(day: str, t: int, ms: int) -> int:
+    return t if day in SECONDS_TRACE_DAYS else t * 1000 + ms
+
+
 def _csv_field(s: str) -> str:
     return '"' + s.replace('"', '""') + '"' if any(c in s for c in ',"\n') else s
 
@@ -144,8 +152,8 @@ def make_bank(root: Path) -> BankFixture:
                 row
                 for t in minutes
                 for row in (
-                    f"{t * 1000 + 257},dockerB2,root-{t},{int(BIG_ID) + t},gw{t},67",
-                    f"{t * 1000 + 259},dockerB2,{int(BIG_ID) + t},child-{t},gw{t},3",
+                    f"{span_time(day, t, 257)},dockerB2,root-{t},{int(BIG_ID) + t},gw{t},67",
+                    f"{span_time(day, t, 259)},dockerB2,{int(BIG_ID) + t},child-{t},gw{t},3",
                 )
             ],
         }

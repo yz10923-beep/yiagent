@@ -36,6 +36,8 @@ import pyarrow.csv as pcsv
 import pyarrow.parquet as pq
 from pydantic import BaseModel, ConfigDict
 
+from yi_agent.data.telemetry import TelemetryError, unit_of
+
 # A mirror of the Google Drive folder Microsoft's README links (unreachable from the
 # cloud container). Its query.csv equals the instructions of Microsoft's own archived
 # Bank run (rca/archive/agent-Bank.csv) 136 of 136, and both small files are pinned below.
@@ -367,7 +369,9 @@ def check_raw(
 # ---- the cut ---------------------------------------------------------------------------
 
 type Progress = Callable[[str], None]
-CUT_VERSION = 1  # bump when the cut's output changes shape: cut again, then reload
+CUT_VERSION = 2  # bump when the cut's output changes: cut again, then reload
+# v2: timestamp units detected per file. Bank's trace files for 2021-03-23..25 are in
+# seconds, the other days' in ms (OpenRCA's prompt says ms); v1 cut no spans on those days.
 BLOCK_BYTES = 64 << 20
 PROGRESS_BYTES = 512 << 20
 
@@ -378,7 +382,17 @@ class CutReport:
     rows: dict[str, dict[str, int]] = field(default_factory=dict)  # case -> kind -> rows
     bad_lines: dict[str, int] = field(default_factory=dict)  # file -> lines skipped
     duplicate_metric_cells: int = 0  # (time, metric) seen twice: the mean is kept
+    units: dict[str, str] = field(default_factory=dict)  # file -> its timestamps' unit
     seconds: float = 0.0
+
+    def empty(self) -> dict[str, list[str]]:
+        """kind -> cases with no rows of it: missing data, or a cut that matched nothing."""
+        out: dict[str, list[str]] = defaultdict(list)
+        for qid, kinds in sorted(self.rows.items()):
+            for k, n in kinds.items():
+                if n == 0:
+                    out[k].append(qid)
+        return dict(out)
 
     def totals(self) -> dict[str, int]:
         out: dict[str, int] = defaultdict(int)
@@ -420,7 +434,6 @@ _TYPES: dict[str, dict[str, pa.DataType]] = {
         "tc": pa.string(),
     },
 }
-_TS_TO_MS = {SOURCES[0]: 1000, SOURCES[1]: 1000, SOURCES[2]: 1000, SOURCES[3]: 1}
 _LONG = pa.schema([("time", pa.int64()), ("metric", pa.string()), ("value", pa.float64())])
 _LOG_SCHEMA = pa.schema(
     [
@@ -442,14 +455,20 @@ _TRACE_SCHEMA = pa.schema(
 )
 
 
-def _log_rows(t: pa.Table) -> pa.Table:
-    return pa.table([t["timestamp"], t["cmdb_id"], t["log_name"], t["value"]], schema=_LOG_SCHEMA)
+# The rows below get the timestamp already in ms (`ms`); logs and metrics are written in
+# seconds and spans in ms, as in RCAEval, whatever unit the source file used.
+def _seconds(ms: pa.ChunkedArray) -> pa.ChunkedArray:
+    return pc.cast(pc.divide(ms, 1000), pa.int64())
 
 
-def _trace_rows(t: pa.Table) -> pa.Table:
+def _log_rows(t: pa.Table, ms: pa.ChunkedArray) -> pa.Table:
+    return pa.table([_seconds(ms), t["cmdb_id"], t["log_name"], t["value"]], schema=_LOG_SCHEMA)
+
+
+def _trace_rows(t: pa.Table, ms: pa.ChunkedArray) -> pa.Table:
     return pa.table(
         [
-            t["timestamp"],
+            ms,
             t["cmdb_id"],
             t["trace_id"],
             t["span_id"],
@@ -460,15 +479,15 @@ def _trace_rows(t: pa.Table) -> pa.Table:
     )
 
 
-def _metric_rows(src: str, t: pa.Table) -> pa.Table:
+def _metric_rows(src: str, t: pa.Table, ms: pa.ChunkedArray) -> pa.Table:
     """Long form (time s, metric, value). A container metric is `<cmdb_id>_<kpi_name>`,
     an application one `<tc>_<kpi>`: the part before the first `_` is the component."""
     if src == "metric/metric_container.csv":
         name = pc.binary_join_element_wise(t["cmdb_id"], t["kpi_name"], "_")
-        return pa.table([t["timestamp"], name, t["value"]], schema=_LONG)
+        return pa.table([_seconds(ms), name, t["value"]], schema=_LONG)
     parts = [
         pa.table(
-            [t["timestamp"], pc.binary_join_element_wise(t["tc"], pa.scalar(kpi), "_"), t[kpi]],
+            [_seconds(ms), pc.binary_join_element_wise(t["tc"], pa.scalar(kpi), "_"), t[kpi]],
             schema=_LONG,
         )
         for kpi in ("rr", "sr", "cnt", "mrt")
@@ -542,20 +561,31 @@ def cut(
             size = path.stat().st_size
             say(f"[{n}/{len(files)}] {day.name} {src} ({size / 1e9:.2f} GB)")
             done, shown, t_file = 0, 0, time.monotonic()
+            rel, unit, to_ms = f"{day.name}/{src}", "", 1.0
             for batch in _blocks(path, src, report):
                 done += batch.nbytes  # in-memory bytes: a rough read position
                 tbl = pa.Table.from_batches([batch])
-                ms = pc.multiply(tbl["timestamp"], _TS_TO_MS[src])
-                lo, hi = pc.min(ms).as_py(), pc.max(ms).as_py()
-                if lo is None:
+                lo_raw, hi_raw = pc.min(tbl["timestamp"]).as_py(), pc.max(tbl["timestamp"]).as_py()
+                if lo_raw is None:
                     continue
+                # One unit per file, from the values (as telemetry.TimeNormalizer does);
+                # a block in another unit stops the cut rather than misplacing rows.
+                if not unit:
+                    unit, to_ms = unit_of(lo_raw)
+                    report.units[rel] = unit
+                    say(f"  timestamps in {unit}")
+                if {unit_of(lo_raw)[0], unit_of(hi_raw)[0]} != {unit}:
+                    raise TelemetryError(f"{rel}: timestamps in more than one unit")
+                ms = pc.cast(pc.multiply(tbl["timestamp"], to_ms), pa.int64())
+                lo, hi = lo_raw * to_ms, hi_raw * to_ms
                 for qid, (a, b) in spans.items():
                     if hi < a or lo >= b:
                         continue
-                    part = tbl.filter(pc.and_(pc.greater_equal(ms, a), pc.less(ms, b)))
+                    mask = pc.and_(pc.greater_equal(ms, a), pc.less(ms, b))
+                    part = tbl.filter(mask)
                     if part.num_rows == 0:
                         continue
-                    _write(tmp, qid, src, part, writers, metrics)
+                    _write(tmp, qid, src, part, pc.filter(ms, mask), writers, metrics)
                 if done - shown >= PROGRESS_BYTES:
                     shown = done
                     rate = done / max(time.monotonic() - t_file, 1e-9) / 1e6
@@ -598,16 +628,17 @@ def _write(
     qid: str,
     src: str,
     part: pa.Table,
+    ms: pa.ChunkedArray,
     writers: dict[tuple[str, str], pq.ParquetWriter],
     metrics: dict[str, list[pa.Table]],
 ) -> None:
     if src.startswith("metric/"):
-        metrics[qid].append(_metric_rows(src, part))
+        metrics[qid].append(_metric_rows(src, part, ms))
         return
     kind, rows, schema = (
-        ("logs", _log_rows(part), _LOG_SCHEMA)
+        ("logs", _log_rows(part, ms), _LOG_SCHEMA)
         if src.startswith("log/")
-        else ("traces", _trace_rows(part), _TRACE_SCHEMA)
+        else ("traces", _trace_rows(part, ms), _TRACE_SCHEMA)
     )
     w = writers.get((qid, kind))
     if w is None:
@@ -646,3 +677,23 @@ def span_containment(case_dir: Path) -> tuple[int, float, float]:
         return ok / len(pairs)
 
     return len(pairs), contained(1.0), contained(1e-3)
+
+
+def coverage(cases: Path) -> str:
+    """Rows per source over every cut case (min / median / max), and the cases with none:
+    a case without spans or logs is missing data the agent will be asked to explain."""
+    from statistics import median
+
+    rows: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    for d in sorted(p for p in cases.iterdir() if p.is_dir()):
+        for kind in ("logs", "traces", "metrics"):
+            rows[kind].append((pq.ParquetFile(d / f"{kind}.parquet").metadata.num_rows, d.name))
+    out = [f"coverage over {len(rows['logs'])} cases (rows per case: min / median / max):"]
+    for kind, vals in rows.items():
+        ns = [n for n, _ in vals]
+        none = [i for n, i in vals if n == 0]
+        out.append(
+            f"  {kind:8} {min(ns):>9,} / {median(ns):>11,.0f} / {max(ns):>11,}   "
+            f"cases with none: {len(none)}" + (f" {none[:8]}" if none else "")
+        )
+    return "\n".join(out)

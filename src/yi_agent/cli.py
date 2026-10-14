@@ -345,15 +345,27 @@ def cmd_bank_cut(settings: Settings, args: argparse.Namespace) -> int:
     )
     print(f"malformed lines skipped: {sum(report.bad_lines.values())} {report.bad_lines}")
     print(f"metric cells recorded twice (mean kept): {report.duplicate_metric_cells}")
+    units = Counter(f"{rel.split('/', 1)[1]}: {u}" for rel, u in report.units.items())
+    print("timestamp units (files): " + ", ".join(f"{k} x{n}" for k, n in sorted(units.items())))
+    for kind, ids in sorted(report.empty().items()):
+        print(f"WARNING {len(ids)} cases have no {kind}: {ids[:8]}")
     return 0
 
 
 def cmd_bank_inspect(settings: Settings, args: argparse.Namespace) -> int:
+    cases = openrca.cases_dir(settings.data_dir)
+    print(openrca.coverage(cases))
     ids = args.ids or openrca.read_split().dev[:2]
     for i in ids:
-        d = openrca.cases_dir(settings.data_dir) / i
+        d = cases / i
+        w = openrca.read_case_window(d)
         print(f"=== {i}")
-        print(inspect_case(d))
+        print(
+            f"window {openrca.local_str(w['start_ms'])} to {openrca.local_str(w['end_ms'])} "
+            f"(UTC+8), baseline from {openrca.local_str(w['baseline_start_ms'])}"
+        )
+        # inspect_case's first line is RCAEval's window (inject_time.txt): not Bank's
+        print(inspect_case(d).split("\n", 1)[1])
         pairs, ms, us = openrca.span_containment(d)
         print(
             f"  span durations: of {pairs} same-host parent/child pairs, {ms:.0%} nest if "

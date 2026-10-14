@@ -91,7 +91,8 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 once, the final agent (Sonnet 5.5 + prompt v2 + tools v2) scores AC@1 0.98 (BARO 0.29),
 Avg@5 0.99 (0.79), fault type 189/283, F1 RE2 0.75 / RE3 0.40, $0.041 a case.
 S5 step 1 (Bank data: fetch, check, cut, inspect, audit, load) built and tested on a
-synthetic Bank; next: Yi runs SETUP step 12 on the VM. Plan: ROADMAP "S5 plan".**
+synthetic Bank and run on the VM (fetch, check, cut, audit clean); the cut is being
+redone (v2) because three days' trace files are timed in seconds. Plan: ROADMAP "S5 plan".**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,

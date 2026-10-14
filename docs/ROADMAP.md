@@ -528,6 +528,25 @@ cloud container), and Microsoft's README:
   `rca/archive/agent-Bank.csv`): strict 20/136 (14.7%), mean partial score 0.23, as
   their file records it. Step 2 re-grades it with our port.
 
+### S5 step 1 on the VM (2026-10-14)
+
+- **Fetch:** 42 files in 56 s (the mirror's CDN; ~470 MB/s). `check`: 0 problems, labels
+  and split as pinned.
+- **First cut (v1): 5.0 min, 1.91 GB, 15.2M log lines, 99.4M spans, 8,131 metric rows
+  (~60 one-minute rows a case, 1,565-1,716 metric columns), 0 malformed lines, 0
+  duplicate cells; audit over 136 cases: no hits.**
+- **Span durations are ms**, as assumed: of 760,005 same-host parent/child pairs in a
+  dev case, 100% nest under ms, 38% under us.
+- **Found by `inspect`: a dev case with 0 spans.** Bank's trace files for 2021-03-23,
+  -24 and -25 time spans in **seconds** (`1616515199`), the other seven days in ms
+  (`1614873922611`), although OpenRCA's prompt says trace timestamps are ms. The v1 cut
+  assumed ms for every trace file, so the 43 queries on those three days got no spans
+  (the giveaway in the log: those files "parsed" at 170-210 MB/s, nothing to write).
+  Cut v2 detects the unit per file from its values, stops on a file that mixes units,
+  prints the units it found, warns on any case left without a source, and `inspect` now
+  prints coverage over all cases. Spans on those three days are timed to the second
+  only; the grader's tolerance is a minute.
+
 ## S5 plan
 
 1. **Data** (built and tested on a synthetic Bank, 2026-10-13): `yi data bank fetch |
