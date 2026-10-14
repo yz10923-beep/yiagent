@@ -546,6 +546,13 @@ cloud container), and Microsoft's README:
   prints the units it found, warns on any case left without a source, and `inspect` now
   prints coverage over all cases. Spans on those three days are timed to the second
   only; the grader's tolerance is a minute.
+- **Cut v2 (VM): 6.0 min, 2.59 GB, 15.2M log lines, 152.7M spans (+53.3M), 8,131
+  metric rows; units found: logs and metrics in s (30 files), traces ms x7, s x3.**
+  Per case: spans 10K / 1.0M / 2.6M (min / median / max), logs 0 / 103K / 276K, metric
+  rows 31 / 60 / 60. Every case has spans and metrics. **Four test queries have no
+  logs**, all on 2021-03-04 between 20:00 and 22:30 (the smallest day's log file, 0.21
+  GB, has none there): missing in the data, not the cut; the Bank alert must say "no
+  logs in this window" rather than imply they were not collected.
 
 ## S5 plan
 
