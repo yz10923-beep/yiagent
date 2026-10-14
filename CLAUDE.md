@@ -94,9 +94,11 @@ S5 step 1 (Bank data: fetch, check, cut, inspect, audit, load) built and tested 
 synthetic Bank and run on the VM (cut v2, audit clean; dev loading). Step 2, the grader
 (OpenRCA's evaluate() vendored; Microsoft's archived run re-graded 136/136; the bar:
 strict 0.16 on test), built; the harness hash changed (Bank files added): Yi re-approves
-(SETUP step 13). S4 addendum, the one-call baseline (`--mode one-call`, `agent/summary.py`,
-decision rule in ROADMAP), built; next: its dev_small smoke (SETUP step 14). Plan: ROADMAP
-"S5 plan".**
+(SETUP step 13; done, replay 136/136 on the VM). S4 addendum, the one-call baseline
+(`--mode one-call`, `agent/summary.py`): on dev one call scores top-1 0.91 and fault type
+38.5/77 against the agent's 1.00 and 46.0, so by the pre-set rule the loop earns its
+cost (ROADMAP "S4 addendum"). Bank dev loaded (34 cases). Next: S5 step 3, the agent on
+Bank. Plan: ROADMAP "S5 plan".**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,

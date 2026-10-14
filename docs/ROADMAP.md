@@ -538,6 +538,41 @@ baseline) is a one-call limit and stays. The smoke is rerun on v2 before dev.
 Bank dev load (VM, 2026-10-14): 34 cases, 48.9M documents in 52 min (15.7K/s), none
 failed.
 
+**Result (dev, 77 cases, summary v2, VM 2026-10-14).** Smoke on v2: dev_small AC@1 0.83
+(v1 0.75; the emailservice delay now right), 24/24 submitted.
+
+| condition | runs | AC@1 | AC@3 | fault right | family right | F1 re2 | F1 re3 | on target | $/case | s/case |
+|---|---|---|---|---|---|---|---|---|---|---|
+| agent (v2/v2) | 3 | **1.00, 1.00, 1.00** | 1.00 | **49, 43, 46 (46.0)** | 73-75 | 0.70-0.80 | 0.17-0.24 | 0.88-0.91 | 0.044 | 14-21 |
+| one call (summary v2) | 2 | **0.91, 0.91** | 0.94-0.95 | **38, 39 (38.5)** | 66, 68 | 0.61, 0.66 | 0.09, 0.07 | 0.79 | 0.026 | 7 |
+| BARO | - | 0.25 | 0.87 | - | - | - | - | - | free | - |
+
+**By the rule written before the runs:** (1) one call does not reach 0.95 top-1 (0.91 in
+both runs, CI 0.82-0.96): localization is not free for an LLM reading a fixed summary;
+(2) on fault type one call is 7.5 cases below the agent's mean (38.5 vs 46.0), past the
+6-case line: **the loop earns its cost**, at 1.7x the price and 2-3x the time.
+
+Where the loop's margin comes from:
+- **Localization, all in RE2, mostly Sock Shop (one call 0.67 there, OB 1.00, TT 0.94,
+  RE3 1.00):** the same 7 cases missed in both runs: delay, loss and socket faults on
+  `orders` and `carts` named as `session-db` (its diskio spikes from a flat baseline,
+  the zero-IQR effect that also inflates BARO), and a Train Ticket loss named as a
+  neighbour. Sock Shop has no traces: the agent follows up on "why do the callees look
+  slow", one call cannot.
+- **Fault type:** one call confuses mem (1-2 of 9 right: read as disk or cpu) and the
+  f-numbers (RE3 F1 0.07-0.09 against 0.17-0.24); families right 66-68 of 77 against
+  73-75.
+- One call is the more stable condition: 9 of 77 answers differ between its two runs
+  (the agent: 18 over three); 37 right in both, 37 wrong in both.
+- The agent rows show "other harness" in `compare` because the hash changed when Bank's
+  files joined it; the RCAEval graders did not change (`git diff 39fb49f`), and
+  re-scoring the agent's trials under the new hash is free.
+
+The honest framing: most of the step from BARO (0.25) to the agent (1.00) is an LLM
+reading BARO-style statistics, logs and traces together (one call: 0.91); the loop adds
+the last 9 points of localization and 7.5 fault types, where the first look misleads.
+
+
 ## S5 decisions (made 2026-10-13; Yi: Bank yes, data for private evaluation only)
 
 - **A case is one query** of `Bank/query.csv` (136), graded as OpenRCA grades it: its
@@ -889,6 +924,18 @@ about 1.9x faster. Open: timed loads of dev_small on the VM, with disk use.
 ## Interview talking points
 
 (Filled in as each stage closes, with numbers.)
+
+**S4 addendum (do you even need an agent?).**
+- *The control:* the same model, guide and report, but one call over a fixed summary of
+  the case's telemetry (no tools, no loop), with a decision rule written before any run.
+  One call: top-1 0.91, fault type 38.5/77, $0.026 a case. The agent: 1.00, 46.0, $0.044.
+- *The answer:* the loop earns its cost, but say how much: most of the gain over BARO
+  comes from an LLM reading the statistics together; the loop adds the cases where the
+  first look misleads (a datastore's disk spike, callees slowed by a delay with no
+  traces), and fault type.
+- *Making the baseline fair:* its first version hid per-operation latency the agent sees
+  by default; fixed before the dev runs, which made the baseline stronger (0.75 -> 0.83
+  on the smoke) and the agent's margin smaller. A weak baseline flatters the system.
 
 **S4 (fault type, and one look at test).**
 - *The result, on 283 held-out test cases:* root cause first 98% (BARO 29%), Avg@5 0.99
