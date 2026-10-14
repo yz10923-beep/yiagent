@@ -518,6 +518,13 @@ finding is "the value was in the features, not the loop".
 Plan: smoke on dev_small (24 cases, ~$1), then dev twice (~$8), then test once (~$14)
 only if dev leaves the headline comparison open.
 
+**Smoke, dev_small (VM, 2026-10-14; plumbing check, not the comparison):** 24/24
+submitted in one call; **$0.024 and 8 s a case** (the agent: $0.044, ~21 s); peak request
+8.7K tokens. **AC@1 0.75** (CI 0.55-0.88), AC@3 0.88, Avg@5 0.84; F1 RE2 0.37, RE3 0.13;
+citations on target 0.67. All 6 RE3 cases localized; the 6 misses are RE2, five of them
+delay or loss (or a mem fault) where it named a datastore (`session-db`, `redis`) or a
+neighbour whose metrics rose more. n=24: the dev runs decide, by the rule above.
+
 ## S5 decisions (made 2026-10-13; Yi: Bank yes, data for private evaluation only)
 
 - **A case is one query** of `Bank/query.csv` (136), graded as OpenRCA grades it: its
