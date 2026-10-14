@@ -47,7 +47,16 @@ def test_a_code_fault_shows_its_error_line_and_error_spans(tmp_path: Path) -> No
     text = build_summary(_case(tmp_path, "re3ob_paymentservice_f5_1"))
     assert "container=paymentservice" in text and "NullPointerException" in text
     spans = text.split("## Traces", 1)[1]
-    assert re.search(r"- paymentservice: \d+ -> \d+; errors 0 -> [1-9]", spans)
+    assert re.search(r"- paymentservice \S+: \d+ -> \d+; errors 0 -> [1-9]", spans)
+    assert re.search(r"Error spans per service.*\n- paymentservice: 0 -> [1-9]", spans)
+
+
+def test_a_delay_shows_in_the_delayed_service_s_own_operation_first(tmp_path: Path) -> None:
+    """Per (service, operation), largest p90 ratio first, as the agent's trace_stats: the
+    delayed service's own operation leads; its callers grow by less, relatively."""
+    text = build_summary(_case(tmp_path, "re2ob_paymentservice_delay_1"))
+    first = re.search(r"Per service and operation.*\n- (\S+) (\S+):", text)
+    assert first and first[1] == "paymentservice"
 
 
 def test_what_the_summary_shows_can_be_cited_and_is_grounded(tmp_path: Path) -> None:

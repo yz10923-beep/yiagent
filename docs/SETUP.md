@@ -228,6 +228,17 @@ the binding to 0.0.0.0.
     Each case prints one result line (1 step, 1 tool call). Done: a score table and the
     BARO comparison. More than 3 minutes without a new line means a stuck call.
 
+    Then the comparison (summary v2; about $2 and 5-10 minutes per dev run), and the
+    free tables beside the agent's three dev runs:
+
+    ```bash
+    uv run yi agent run --split dev --variant one-call-dev --mode one-call --prompt v2 --parallel 3 2>&1 | tee ~/one-call-dev.txt
+    uv run yi agent run --split dev --variant one-call-dev-2 --mode one-call --prompt v2 --parallel 3 2>&1 | tee ~/one-call-dev-2.txt
+    uv run yi agent compare --split dev s4-prompt-tools s4-repeat s4-repeat-2 one-call-dev one-call-dev-2 2>&1 | tee ~/one-call-compare.txt
+    uv run yi eval agreement --split dev one-call-dev one-call-dev-2 2>&1 | tee -a ~/one-call-compare.txt
+    uv run yi eval confusion --split dev one-call-dev one-call-dev-2 2>&1 | tee -a ~/one-call-compare.txt
+    ```
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

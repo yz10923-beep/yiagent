@@ -10,8 +10,9 @@ calls would show, with every limit fixed in advance:
   seconds without a cpu sample just after the onset (a restart leaves a gap);
 - logs: per container, lines and error-looking lines before and after the onset; the
   largest error groups after it; message groups that are new after it (startup lines);
-- traces: per service, spans, error spans and p50/p90 duration before and after; the
-  slowest spans after the onset.
+- traces: per service and operation, spans, error spans and p50/p90 duration before and
+  after, largest p90 growth first (the agent's trace_stats default); services whose
+  error spans grew; the slowest spans after the onset.
 
 It reads the case's Parquet files, not Elasticsearch, so a split can run without
 loading it. A case directory's name is its label: nothing here prints a path or a name,
@@ -34,14 +35,17 @@ from yi_agent.eval import baro
 from yi_agent.eval.case_data import CaseData, is_error_status
 from yi_agent.eval.grounding import ERROR_LINE
 
-SUMMARY_VERSION = 1  # part of the run's condition: bump when the summary changes
+# part of the run's condition: bump when the summary changes. v2 (2026-10-14): traces per
+# (service, operation) as trace_stats shows them, not per service, which hid which call
+# got slow (a delay on emailservice showed only as checkout's p90; dev_small smoke).
+SUMMARY_VERSION = 2
 HALF_MS = 10 * 60 * 1000
 TOP_SERVICES = 10
 TOP_METRICS = 15
 TOP_DIPS = 5
 LOG_GROUPS = 12
 NEW_GROUPS = 8
-TRACE_SERVICES = 10
+TRACE_OPERATIONS = 25  # trace_stats' default limit
 SLOW_SPANS = 8
 GAP_LOOK_S = 120
 LINE_CHARS = 200
@@ -185,45 +189,59 @@ def _trace_section(case_dir: Path, onset: int) -> list[str]:
     t = pq.read_table(path, columns=cols)
     start = np.array([-1 if v is None else v for v in TimeNormalizer()(t.column(col))], np.int64)
     svc = t.column("serviceName").to_pylist()
+    ops = t.column("operationName").to_pylist() if "operationName" in have else [None] * t.num_rows
     dur_us = t.column("duration").to_numpy(zero_copy_only=False).astype(np.float64)
     status = t.column("statusCode").to_pylist() if "statusCode" in have else [None] * t.num_rows
     timed = np.isfinite(dur_us)  # a span without a duration says nothing about latency
     before = (start >= onset - HALF_MS) & (start < onset) & timed
     after = (start >= onset) & (start < onset + HALF_MS) & timed
-    rows: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    errs: dict[str, Counter[str]] = defaultdict(Counter)
+    # per (service, operation), as the agent's trace_stats shows them by default
+    rows: dict[tuple[str, str], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    errs: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     for i in np.flatnonzero(before | after):
         side = "after" if after[i] else "before"
-        s = svc[i] or "?"
-        rows[s][side].append(dur_us[i])
-        errs[s][side] += is_error_status(status[i])
+        key = (svc[i] or "?", ops[i] or "-")
+        rows[key][side].append(dur_us[i])
+        errs[key][side] += is_error_status(status[i])
 
     def p(xs: list[float], q: int) -> str:
         return f"{np.percentile(xs, q) / 1000:.1f}" if xs else "-"
 
-    def ratio(s: str) -> float:
-        a, b = rows[s]["after"], rows[s]["before"]
-        return float(np.percentile(a, 90) / max(np.percentile(b, 90), 1.0)) if a and b else 0.0
+    def ratio(k: tuple[str, str]) -> float:
+        a, b = rows[k]["after"], rows[k]["before"]
+        if not a:
+            return 0.0
+        if not b:
+            return float("inf")
+        return float(np.percentile(a, 90) / max(np.percentile(b, 90), 1.0))
 
-    ranked = sorted(rows, key=lambda s: (-(errs[s]["after"] - errs[s]["before"]), -ratio(s)))
+    # trace_stats' order: largest p90 ratio first, operations seen only after the onset first
+    ranked = sorted(rows, key=lambda k: -1e18 if ratio(k) == float("inf") else -ratio(k))
     out = [
         "## Traces (10 min before / after the onset; durations in ms)",
-        f"Per service (top {TRACE_SERVICES} of {len(ranked)} by new error spans, then p90 growth): "
-        "spans before -> after; error spans before -> after; p50 before -> after; "
-        "p90 before -> after:",
+        f"Per service and operation (top {TRACE_OPERATIONS} of {len(ranked)}, largest p90 "
+        "ratio first): spans before -> after; error spans before -> after; p50 before -> "
+        "after; p90 before -> after; p90 ratio:",
     ]
-    for s in ranked[:TRACE_SERVICES]:
-        r, e = rows[s], errs[s]
+    for k in ranked[:TRACE_OPERATIONS]:
+        r, e = rows[k], errs[k]
         out.append(
-            f"- {s}: {len(r['before'])} -> {len(r['after'])}; "
+            f"- {k[0]} {k[1]}: {len(r['before'])} -> {len(r['after'])}; "
             f"errors {e['before']} -> {e['after']}; "
             f"p50 {p(r['before'], 50)} -> {p(r['after'], 50)}; "
-            f"p90 {p(r['before'], 90)} -> {p(r['after'], 90)}"
+            f"p90 {p(r['before'], 90)} -> {p(r['after'], 90)}; x{ratio(k):.2f}"
         )
+    per_service: Counter[str] = Counter()
+    before_errors: Counter[str] = Counter()
+    for (s, _), e in errs.items():
+        per_service[s] += e["after"]
+        before_errors[s] += e["before"]
+    grew = [(s, n) for s, n in per_service.most_common() if n > before_errors[s]]
+    out.append("Error spans per service, before -> after (services with more after):")
+    out += [f"- {s}: {before_errors[s]} -> {n}" for s, n in grew[:TRACE_OPERATIONS]] or ["- none"]
     idx = np.flatnonzero(after)
     slow = idx[np.argsort(-dur_us[idx])][:SLOW_SPANS]
     ids = t.column("spanID").to_pylist()
-    ops = t.column("operationName").to_pylist() if "operationName" in have else [None] * t.num_rows
     out.append("Slowest spans after the onset:")
     out += [
         f"- span_id={ids[i]} service={svc[i]} operation={ops[i]} "

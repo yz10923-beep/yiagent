@@ -525,6 +525,19 @@ citations on target 0.67. All 6 RE3 cases localized; the 6 misses are RE2, five 
 delay or loss (or a mem fault) where it named a datastore (`session-db`, `redis`) or a
 neighbour whose metrics rose more. n=24: the dev runs decide, by the rule above.
 
+**Summary v2 (2026-10-14), before any dev run.** Two misses' summaries read in full: in
+the Online Boutique emailservice delay, the summary's per-service trace table showed only
+checkout's p90 rising (51 -> 204 ms), not which call; the agent's `trace_stats` shows
+latency per (service, operation) by default, so the summary did not hold what the
+agent's first look holds. v2 shows traces per (service, operation), top 25 by p90 ratio,
+as `trace_stats` orders them, plus services whose error spans grew. A parity fix against
+the stated design, not tuning to the misses; the other miss (Sock Shop delay, no traces:
+callees' latency rose, the model named the datastore whose diskio spiked from a flat
+baseline) is a one-call limit and stays. The smoke is rerun on v2 before dev.
+
+Bank dev load (VM, 2026-10-14): 34 cases, 48.9M documents in 52 min (15.7K/s), none
+failed.
+
 ## S5 decisions (made 2026-10-13; Yi: Bank yes, data for private evaluation only)
 
 - **A case is one query** of `Bank/query.csv` (136), graded as OpenRCA grades it: its
