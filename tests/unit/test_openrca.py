@@ -15,6 +15,7 @@ from tests.openrca_fixture import BIG_ID, BankFixture, make_bank
 from yi_agent.data import openrca
 from yi_agent.data.openrca import BankQuery, local_ms, local_str, parse_window
 from yi_agent.data.telemetry import FileStats, TelemetryError, iter_docs, pick_time_column
+from yi_agent.eval import bank
 
 SPLIT_SHA256 = "7a08c564ebaa154c30ba58da1b14ef28b3cba585b62de46e3966aa6b7c544bf9"
 
@@ -299,6 +300,15 @@ def _use_fixture(fx: BankFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     monkeypatch.setattr(openrca, "QUERY_SHA256", fx.query_sha)
     monkeypatch.setattr(openrca, "RECORD_SHA256", fx.record_sha)
     monkeypatch.setattr(openrca, "LABELS_SHA256", fx.labels_sha)
+    monkeypatch.setattr(bank, "ARCHIVE_SHA256", fx.archive_sha)
+
+    def fetch_archive(data_dir: Path) -> Path:  # what GitHub would serve
+        dest = bank.archive_path(data_dir)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(fx.archive.read_bytes())
+        return dest
+
+    monkeypatch.setattr(bank, "fetch_archive", fetch_archive)
 
 
 def test_the_bank_commands_run_through_the_cli(

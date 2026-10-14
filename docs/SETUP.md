@@ -205,6 +205,19 @@ the binding to 0.0.0.0.
     its 40 files, and every 0.5 GB within the large ones; it is all or nothing, so an
     interrupted cut is simply rerun. The load prints progress per case.
 
+13. **The Bank grader (S5 step 2; free, a minute).** It changes the harness hash (Bank's
+    split and data code are now in it), so review the diff, then approve once:
+
+    ```bash
+    git diff --stat 39fb49f -- src/yi_agent/eval src/yi_agent/data evals/   # 39fb49f: the last approval (S2)
+    uv run yi data bank fetch 2>&1 | tee ~/bank-fetch2.txt     # seconds: also fetches Microsoft's archived run
+    uv run yi eval bank-replay --approve-harness 2>&1 | tee ~/bank-replay.txt
+    uv run yi eval bank-baseline oracle --split test 2>&1 | tee ~/bank-baselines.txt
+    for b in empty wrong random; do uv run yi eval bank-baseline $b --split test 2>&1 | tee -a ~/bank-baselines.txt; done
+    ```
+
+    The replay must print `recorded scores reproduced: 136/136`.
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

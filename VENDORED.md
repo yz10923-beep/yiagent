@@ -35,3 +35,14 @@ from either project.
 scikit-learn (same percentiles, same zero-spread rule); no other change in behaviour.
 The check that it is faithful is `yi eval reproduce-baro` against the published RE2-TT
 numbers (docs/ROADMAP.md).
+
+## Vendored from OpenRCA
+
+`src/yi_agent/eval/openrca_evaluate.py` is `evaluate()` from microsoft/OpenRCA
+`main/evaluate.py` (MIT, Copyright (c) Microsoft Corporation; licence in
+`LICENSES/LICENSE-OpenRCA`; read 2026-10-14). Changes: type annotations and formatting
+only. The check that our pipeline grades as OpenRCA does is `yi eval bank-replay`:
+Microsoft's archived Bank run (`rca/archive/agent-Bank.csv`, pinned by sha256) re-graded
+through our labels and report format, every recorded score reproduced (136/136 on the
+real data, 2026-10-14; the recorded scores are unrounded, `evaluate()` rounds to two
+decimals, so equal within 0.005).

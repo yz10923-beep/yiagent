@@ -91,8 +91,10 @@ Plan: `docs/ROADMAP.md` (S0-S5). Setup and the VM: `docs/SETUP.md`.
 once, the final agent (Sonnet 5.5 + prompt v2 + tools v2) scores AC@1 0.98 (BARO 0.29),
 Avg@5 0.99 (0.79), fault type 189/283, F1 RE2 0.75 / RE3 0.40, $0.041 a case.
 S5 step 1 (Bank data: fetch, check, cut, inspect, audit, load) built and tested on a
-synthetic Bank and run on the VM (fetch, check, cut, audit clean); the cut is being
-redone (v2) because three days' trace files are timed in seconds. Plan: ROADMAP "S5 plan".**
+synthetic Bank and run on the VM (cut v2, audit clean; dev loading). Step 2, the grader
+(OpenRCA's evaluate() vendored; Microsoft's archived run re-graded 136/136; the bar:
+strict 0.16 on test), built; the harness hash changed (Bank files added): Yi re-approves
+(SETUP step 13). Plan: ROADMAP "S5 plan".**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -277,6 +279,7 @@ src/yi_agent/
               openrca (Bank: queries, labels, split, fetch, check, cut into case dirs),
               es_load (fresh indices per case, counts verified), alert, check (VM audits)
   eval/       report (the agent's output format), scoring, grade, grounding, case_data
+              bank + openrca_evaluate (OpenRCA Bank grading, OpenRCA's evaluate vendored),
               (grader reads Parquet), baro (port of RCAEval's), baselines, harness
               (hash + approval), run (baseline -> trials -> scores.json), tables
 evals/grader/labels.json  id -> label; harness and graders only, never the agent

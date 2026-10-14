@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from yi_agent.data.openrca import SPLIT_PATH as BANK_SPLIT_PATH
 from yi_agent.data.rcaeval import LABELS_PATH, SPLIT_PATH
 
 _SRC = Path(__file__).resolve().parents[1]  # src/yi_agent
@@ -28,6 +29,8 @@ def hashed_files() -> list[Path]:
     files = sorted((_SRC / "eval").glob("*.py"))
     files += [_SRC / "data" / "rcaeval.py", _SRC / "data" / "telemetry.py"]
     files += [LABELS_PATH, SPLIT_PATH]
+    # OpenRCA Bank (S5): its labels are not in the repo; their pinned hash is in openrca.py
+    files += [_SRC / "data" / "openrca.py", BANK_SPLIT_PATH]
     return files
 
 

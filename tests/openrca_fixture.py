@@ -10,6 +10,7 @@ day's spans timed in seconds where the other's are in ms (as in the real downloa
 
 from __future__ import annotations
 
+import csv
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +80,36 @@ RECORDS = [
 ]
 
 
+def _entry(time: str = "", component: str = "", reason: str = "") -> str:
+    return (
+        f'{{"root cause occurrence datetime": "{time}", "root cause component": '
+        f'"{component}", "root cause reason": "{reason}"}}'
+    )
+
+
+# The archived predictions for QUERIES and the scores OpenRCA's grader recorded for them,
+# worked out by hand from its rules: points matched / points, the best pairing over the
+# failures, 0 when the number of failures differs, a time right within 60 s.
+ARCHIVED = [
+    ('{"1": ' + _entry("", "Tomcat01", "high CPU usage") + "}", "1.0"),
+    ('{"1": ' + _entry("2021-03-04 23:42:00") + "}", "1.0"),  # 60 s off: right
+    (
+        '{"1": ' + _entry("2021-03-04 23:45:00", "MG01", "network packet loss") + "}",
+        "0.3333333333333333",
+    ),
+    ('{"1": ' + _entry(reason="high memory usage") + ', "2": ' + _entry(reason="x") + "}", "0.0"),
+    (  # in time order, the scoring points are not: the best pairing finds all four
+        '{"1": '
+        + _entry("2021-03-05 10:08:00", "apache01")
+        + ', "2": '
+        + _entry("2021-03-05 10:21:00", "IG02")
+        + "}",
+        "1.0",
+    ),
+    ('{"1": ' + _entry(component="Tomcat2") + "}", "0.0"),
+]
+
+
 @dataclass
 class BankFixture:
     root: Path  # what `fetch` downloads into: <root>/Bank/...
@@ -87,6 +118,8 @@ class BankFixture:
     record_sha: str
     labels_sha: str
     split_text: str
+    archive: Path  # a stand-in for Microsoft's archived run, in its columns
+    archive_sha: str
 
     def pins(self) -> dict[str, object]:
         """check_raw's pins for this download, as the real ones are for the real one."""
@@ -163,6 +196,17 @@ def make_bank(root: Path) -> BankFixture:
             p.write_text("\n".join(lines) + "\n")
             sizes[f"Bank/telemetry/{day}/{rel}"] = p.stat().st_size
     labels = openrca.labels_from_csv(q, r)
+    archive = root / "archive" / "agent-Bank.csv"
+    archive.parent.mkdir(parents=True)
+    rows = [
+        {"instruction": i, "prediction": pred, "score": score, "row_id": f"{n}.0", "task_index": t}
+        for n, ((t, i, _), (pred, score)) in enumerate(zip(QUERIES, ARCHIVED, strict=True))
+    ]
+    with archive.open("w", newline="") as f:
+        cols = ["instruction", "prediction", "groundtruth", "passed", "failed", "score"]
+        w = csv.DictWriter(f, fieldnames=[*cols, "row_id", "task_index"], restval="")
+        w.writeheader()
+        w.writerows(rows)
     return BankFixture(
         root=root,
         sizes=sizes,
@@ -170,4 +214,6 @@ def make_bank(root: Path) -> BankFixture:
         record_sha=hashlib.sha256((bank / "record.csv").read_bytes()).hexdigest(),
         labels_sha=hashlib.sha256(openrca.labels_json(labels).encode()).hexdigest(),
         split_text=openrca.split_json(openrca.make_split(labels)),
+        archive=archive,
+        archive_sha=hashlib.sha256(archive.read_bytes()).hexdigest(),
     )

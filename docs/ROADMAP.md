@@ -554,6 +554,30 @@ cloud container), and Microsoft's README:
   GB, has none there): missing in the data, not the cut; the Bank alert must say "no
   logs in this window" rather than imply they were not collected.
 
+### S5 step 2: the grader (2026-10-14)
+
+- `eval/openrca_evaluate.py`: OpenRCA's `evaluate()`, vendored as is (MIT). `eval/bank.py`:
+  the report (`BankReport`: one entry per failure, time "YYYY-mm-dd HH:MM:SS" UTC+8,
+  component, reason; plus typed evidence), rendered into OpenRCA's prediction string and
+  scored by `evaluate()` against the verbatim scoring points. Reported as OpenRCA does
+  (strict accuracy, mean score, by difficulty), plus by task and by reason, and a
+  diagnostic per failure against the full truth (component / reason / time right,
+  asked or not). A run must cover its split; infra failures are counted, not scored.
+  Results go under `<data_dir>/openrca/results`, never the repo.
+- **Replay of Microsoft's archived RCA-agent run** (Claude 3.5 Sonnet, `agent-Bank.csv`,
+  pinned): every recorded score reproduced through our labels and report format,
+  **136/136** (checked in the container from the two small files and the archive; 7 rows
+  differ only by `evaluate()`'s 2-decimal rounding). Their run: **strict 0.15 (20/136),
+  mean 0.23** on all queries; **test (102): strict 0.16, mean 0.23**; strongest on high
+  CPU (strict 0.29) and memory (0.36), weakest on network latency (0.07), packet loss
+  (0.03), disk space and OOM (0.00).
+- **Selftest on the real labels:** oracle 1.00 / 1.00 (strict / mean), empty 0 / 0,
+  wrong 0 / 0, random (the right number of failures, random component, reason and
+  minute) test 0.05 / 0.11, dev 0.06 / 0.17; chance per field is 1/14 component, 1/8
+  reason, ~3/30 time.
+- `data/openrca.py` and `evals/split_bank.json` are now in the harness hash (eval/*.py
+  already was), so the hash changed: Yi re-approves after reviewing the diff.
+
 ## S5 plan
 
 1. **Data** (built and tested on a synthetic Bank, 2026-10-13): `yi data bank fetch |

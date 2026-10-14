@@ -33,7 +33,7 @@ from yi_agent.data.es_load import (
 from yi_agent.data.rcaeval import LABELS_PATH, SPLIT_PATH, CaseLabel, fetch, read_labels
 from yi_agent.data.split import read_split, split_hash
 from yi_agent.data.telemetry import TelemetryError, read_window
-from yi_agent.eval import baselines
+from yi_agent.eval import bank, baselines
 from yi_agent.eval import run as eval_run
 from yi_agent.eval.grade import RunInvalid
 from yi_agent.eval.harness import HarnessNotApproved
@@ -162,6 +162,33 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
     if failed:
         print(f"{len(failed)} cases failed to load: {failed}")
     return 1 if failed else 0
+
+
+def cmd_eval_bank_baseline(settings: Settings, args: argparse.Namespace) -> int:
+    path, table = bank.run_baseline(
+        args.name, args.split, settings.data_dir, args.approve_harness, seed=args.seed
+    )
+    print(f"OpenRCA Bank, {args.split}, baseline {args.name}")
+    print(table)
+    print(f"trials: {path}")
+    return 0
+
+
+def cmd_eval_bank_score(settings: Settings, args: argparse.Namespace) -> int:
+    print(bank.score_run(args.trials, args.split, settings.data_dir, args.approve_harness))
+    return 0
+
+
+def cmd_eval_bank_replay(settings: Settings, args: argparse.Namespace) -> int:
+    same, n, mismatches, tables = bank.replay_archive(settings.data_dir, args.approve_harness)
+    print("Microsoft's archived RCA-agent run on Bank, re-graded with OpenRCA's evaluate()")
+    print(f"recorded scores reproduced: {same}/{n}")
+    for m in mismatches[:20]:
+        print("MISMATCH", m)
+    for split, table in tables.items():
+        print(f"\n{split}:")
+        print(table)
+    return 0 if same == n else 1
 
 
 def _progress(msg: str) -> None:
@@ -306,6 +333,8 @@ def cmd_bank_fetch(settings: Settings, args: argparse.Namespace) -> int:
     root = openrca.raw_dir(settings.data_dir)
     print(f"downloading OpenRCA Bank from {openrca.HF_REPO} into {root} (26.4 GB, resumable)")
     openrca.fetch(settings.data_dir)
+    print(f"fetching Microsoft's archived Bank run (the bar) from {bank.ARCHIVE_URL}")
+    bank.fetch_archive(settings.data_dir)
     print("done; next: yi data bank check")
     return 0
 
@@ -453,26 +482,26 @@ def build_parser() -> argparse.ArgumentParser:
     c = data.add_parser("unload", help="delete a case's indices")
     c.add_argument("ids", nargs="+")
     c.set_defaults(fn=cmd_unload)
-    bank = data.add_parser("bank", help="OpenRCA Bank (S5)").add_subparsers(
+    bank_cmds = data.add_parser("bank", help="OpenRCA Bank (S5)").add_subparsers(
         dest="bank_cmd", required=True
     )
-    bank.add_parser("fetch", help="download Bank (26.4 GB) from Hugging Face").set_defaults(
+    bank_cmds.add_parser("fetch", help="download Bank (26.4 GB) from Hugging Face").set_defaults(
         fn=cmd_bank_fetch
     )
-    bank.add_parser("check", help="verify the download against the frozen labels").set_defaults(
-        fn=cmd_bank_check
-    )
-    bank.add_parser("cut", help="cut each query's window into a case directory").set_defaults(
+    bank_cmds.add_parser(
+        "check", help="verify the download against the frozen labels"
+    ).set_defaults(fn=cmd_bank_check)
+    bank_cmds.add_parser("cut", help="cut each query's window into a case directory").set_defaults(
         fn=cmd_bank_cut
     )
-    c = bank.add_parser("inspect", help="schemas, time units, span durations of cut cases")
+    c = bank_cmds.add_parser("inspect", help="schemas, time units, span durations of cut cases")
     c.add_argument("ids", nargs="*", help="query ids (default: two dev queries)")
     c.set_defaults(fn=cmd_bank_inspect)
     for name, fn, help_ in (
         ("audit", cmd_bank_audit, "scan cut cases for anything that could leak the answer"),
         ("load", cmd_bank_load, "load cut cases into Elasticsearch, verify counts, then unload"),
     ):
-        c = bank.add_parser(name, help=help_)
+        c = bank_cmds.add_parser(name, help=help_)
         c.add_argument("ids", nargs="*", help="query ids (default: the whole --split)")
         c.add_argument("--split", choices=("dev", "test", "all"), default="dev")
         if name == "load":
@@ -490,6 +519,20 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--seed", type=int, default=0)
     c.add_argument("--approve-harness", action="store_true", help=approve_help)
     c.set_defaults(fn=cmd_eval_baseline)
+    c = ev.add_parser("bank-baseline", help="OpenRCA Bank: run a baseline and score it")
+    c.add_argument("name", choices=sorted(bank.BASELINES))
+    c.add_argument("--split", choices=bank.SPLITS, default="dev")
+    c.add_argument("--seed", type=int, default=0)
+    c.add_argument("--approve-harness", action="store_true", help=approve_help)
+    c.set_defaults(fn=cmd_eval_bank_baseline)
+    c = ev.add_parser("bank-score", help="OpenRCA Bank: grade a trials.jsonl over a split")
+    c.add_argument("trials", type=Path)
+    c.add_argument("--split", choices=bank.SPLITS, default="dev")
+    c.add_argument("--approve-harness", action="store_true", help=approve_help)
+    c.set_defaults(fn=cmd_eval_bank_score)
+    c = ev.add_parser("bank-replay", help="re-grade Microsoft's archived Bank run (the bar)")
+    c.add_argument("--approve-harness", action="store_true", help=approve_help)
+    c.set_defaults(fn=cmd_eval_bank_replay)
     c = ev.add_parser("score", help="grade a trials.jsonl over a whole split")
     c.add_argument("trials", type=Path)
     c.add_argument("--split", choices=eval_run.SPLITS, default="dev")
@@ -584,7 +627,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except HarnessNotApproved as e:
         print(str(e), file=sys.stderr)
         return 2
-    except RunInvalid as e:
+    except (RunInvalid, bank.RunInvalid) as e:
         print(f"run is invalid, not scored: {e}", file=sys.stderr)
         return 2
     except ConditionChanged as e:
