@@ -488,6 +488,36 @@ cloud container), and Microsoft's README:
 - Model cost estimate: ~136 cases x $0.04-0.08 (more steps on a harder benchmark) =
   ~$6-11 a run.
 
+## S4 addendum: do you even need an agent? (one-call baseline, 2026-10-14)
+
+The question after "did you beat BARO?". The agent's 0.98 top-1 could mean the loop
+earns its cost, or only that RCAEval localization is easy for any LLM given BARO's
+ranking. One condition changed: the same model (Sonnet 5.5), the same v2 fault guide,
+the same report and grader, but **no tools and no loop**: one model call
+(`--mode one-call`, `max_steps` 1, only `submit_report`), given a fixed summary of the
+case (`agent/summary.py`, `SUMMARY_VERSION` 1) built from the case's Parquet files with
+every limit fixed in advance: per service each metric family's largest rise and fall
+(BARO's robust z), the top 15 metrics by name, cpu sample gaps after the onset; log
+lines and error lines per container before and after, the 12 largest error groups and
+8 groups new after the onset, each with a citable example; per service span and error
+counts and p50/p90 before and after, and the 8 slowest spans. At most ~12K tokens. No
+Elasticsearch, so the test split needs no reload.
+
+Caveat, stated before any run: the summary carries what S4 learned (the families that
+separate socket from cpu, the memory dip, error lines). If it matches the agent, the
+finding is "the value was in the features, not the loop".
+
+**Decision rule (written before any paid run):**
+1. Localization: one call at top-1 >= 0.95 on dev means RCAEval localization is easy for
+   an LLM; the agent's claim then rests on fault type only.
+2. Fault type: the agent scored 46 +- 3 of 77 on dev (3 runs). The loop earns its cost if
+   one call's mean over its runs is 6 or more cases lower; it does not if within 3;
+   between is "not shown".
+3. Cost and wall time per case are reported beside the scores.
+
+Plan: smoke on dev_small (24 cases, ~$1), then dev twice (~$8), then test once (~$14)
+only if dev leaves the headline comparison open.
+
 ## S5 decisions (made 2026-10-13; Yi: Bank yes, data for private evaluation only)
 
 - **A case is one query** of `Bank/query.csv` (136), graded as OpenRCA grades it: its

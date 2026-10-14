@@ -218,6 +218,16 @@ the binding to 0.0.0.0.
 
     The replay must print `recorded scores reproduced: 136/136`.
 
+14. **One-call baseline smoke (S4 addendum; paid, about $1 and 5-10 minutes).** Needs
+    the harness approved (step 13), no Elasticsearch (it reads the case files).
+
+    ```bash
+    uv run yi agent run --split dev_small --variant one-call-smoke --mode one-call --prompt v2 --parallel 3 2>&1 | tee ~/one-call-smoke.txt
+    ```
+
+    Each case prints one result line (1 step, 1 tool call). Done: a score table and the
+    BARO comparison. More than 3 minutes without a new line means a stuck call.
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

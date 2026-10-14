@@ -25,8 +25,15 @@ from typing import Any
 from elasticsearch import ApiError, Elasticsearch, TransportError
 
 from yi_agent.agent.loop import AgentConfig, AgentResult, InfraFailure, run_agent
-from yi_agent.agent.prompt import GUIDES, system_prompt, system_sha
-from yi_agent.agent.tools import TOOLSETS, CaseIndices, CaseTools, dispatch
+from yi_agent.agent.prompt import (
+    GUIDES,
+    one_call_message,
+    one_call_prompt,
+    system_prompt,
+    system_sha,
+)
+from yi_agent.agent.summary import SUMMARY_VERSION, build_summary
+from yi_agent.agent.tools import SUBMIT, TOOLSETS, CaseIndices, CaseTools, ToolError, dispatch
 from yi_agent.data.alert import make_alert
 from yi_agent.data.es_load import LoadError, ensure_loaded, unload_case
 from yi_agent.data.rcaeval import CaseLabel
@@ -65,27 +72,57 @@ class Condition:
     placebo: bool = False
     prompt: str = "v1"  # agent/prompt.py GUIDES
     tools: str = "v1"  # agent/tools.py TOOLSETS
+    # "one-call": the baseline that answers "do you need an agent?" (S4 addendum): one
+    # model call, a fixed summary of the case (agent/summary.py), submit_report only.
+    mode: str = "agent"
 
     def __post_init__(self) -> None:
         if self.prompt not in GUIDES or self.tools not in TOOLSETS:
             raise ValueError(f"unknown prompt {self.prompt!r} or tools {self.tools!r}")
+        if self.mode not in ("agent", "one-call"):
+            raise ValueError(f"unknown mode {self.mode!r}")
+        if self.mode == "one-call" and self.placebo:
+            raise ValueError("the placebo is a control for the agent, not for one call")
+
+    @property
+    def one_call(self) -> bool:
+        return self.mode == "one-call"
+
+    def tool_specs(self) -> list[dict[str, Any]]:
+        if self.one_call:
+            return [t for t in TOOLSETS[self.tools] if t["name"] == SUBMIT]
+        return TOOLSETS[self.tools]
 
     def config(self) -> AgentConfig:
+        if self.one_call:  # one model call: no tools to run, no turn to nudge in
+            return AgentConfig(
+                max_steps=1, system=one_call_prompt(self.prompt), tools=self.tool_specs()
+            )
         return AgentConfig(
             max_steps=self.max_steps,
             system=system_prompt(self.prompt),
             tools=TOOLSETS[self.tools],
         )
 
+    def system_sha(self) -> str:
+        if self.one_call:
+            return hashlib.sha256(one_call_prompt(self.prompt).encode()).hexdigest()[:12]
+        return system_sha(self.prompt)
+
     def record(self) -> dict[str, Any]:
         rec: dict[str, Any] = {
             "model": self.model,
             "effort": self.effort,
-            "max_steps": self.max_steps,
-            "system_sha": system_sha(self.prompt),
+            "max_steps": 1 if self.one_call else self.max_steps,
+            "system_sha": self.system_sha(),
             "tools_sha": tools_sha(self.tools),
             "loop_version": LOOP_VERSION,
         }
+        if self.one_call:  # only when set, so earlier run.json files still match
+            spec = json.dumps(self.tool_specs(), sort_keys=True).encode()
+            rec["tools_sha"] = hashlib.sha256(spec).hexdigest()[:12]
+            rec["mode"] = "one-call"
+            rec["summary_version"] = SUMMARY_VERSION
         # Versions are recorded only when not the S3 ones, so S3's run.json files match.
         if self.prompt != "v1":
             rec["prompt"] = self.prompt
@@ -216,12 +253,25 @@ async def _run_case(
         tools = CaseTools(indices, fake, half_window_ms=PLACEBO_HALF_MS, error_counts=errs)
     result = AgentResult(case_id=label.id)
     try:
-        try:
-            await asyncio.to_thread(ensure_loaded, es, label.id, case_dir, say)
-        except (LoadError, ApiError, TransportError) as e:
-            raise InfraFailure(f"loading the case failed: {e}") from e
         tracer = Tracer(label.id, JsonlSpanWriter(run_dir / "traces" / f"{label.id}.jsonl"))
-        result = await run_agent(make_provider(), alert, partial(dispatch, tools), config, tracer)
+        if cond.one_call:  # no Elasticsearch: the summary is read from the case's files
+            summary = await asyncio.to_thread(build_summary, case_dir)
+            result = await run_agent(
+                make_provider(),
+                alert,
+                _no_tools,
+                config,
+                tracer,
+                opening=one_call_message(alert, summary),
+            )
+        else:
+            try:
+                await asyncio.to_thread(ensure_loaded, es, label.id, case_dir, say)
+            except (LoadError, ApiError, TransportError) as e:
+                raise InfraFailure(f"loading the case failed: {e}") from e
+            result = await run_agent(
+                make_provider(), alert, partial(dispatch, tools), config, tracer
+            )
     except InfraFailure as e:
         result = e.result or result
         return Trial(case_id=label.id, status="infra_error", error=str(e)), trajectory(
@@ -232,7 +282,7 @@ async def _run_case(
             run_dir / "events" / f"{label.id}.json",
             {
                 "case_id": label.id,
-                "system_sha": system_sha(cond.prompt),
+                "system_sha": cond.system_sha(),
                 "messages": result.messages,
             },
         )
@@ -240,6 +290,10 @@ async def _run_case(
     # read as an infra failure and dropped from the scores.
     report = result.report or Report(case_id=label.id, summary=f"no report: {result.outcome}")
     return Trial(case_id=label.id, report=report), trajectory(result)
+
+
+def _no_tools(name: str, args: dict[str, Any]) -> str:
+    raise ToolError(f"there are no tools in this run: {name} is not available")
 
 
 def _case_line(trial: Trial, traj: dict[str, Any], label: CaseLabel, data_dir: Path) -> str:

@@ -262,14 +262,19 @@ def cmd_eval_metric_kinds(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_agent_run(settings: Settings, args: argparse.Namespace) -> int:
-    cond = Condition(
-        model=args.model,
-        effort=args.effort,
-        max_steps=args.max_steps,
-        placebo=args.placebo,
-        prompt=args.prompt,
-        tools=args.tools,
-    )
+    try:
+        cond = Condition(
+            model=args.model,
+            effort=args.effort,
+            max_steps=args.max_steps,
+            placebo=args.placebo,
+            prompt=args.prompt,
+            tools=args.tools,
+            mode=args.mode,
+        )
+    except ValueError as e:
+        print(f"bad condition: {e}", file=sys.stderr)
+        return 2
     key = settings.anthropic_api_key
 
     def provider() -> LLMProvider:
@@ -596,6 +601,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="delete each case's indices after its trial (keeps few cases loaded)",
     )
     c.add_argument("--prompt", choices=sorted(GUIDES), default="v1", help="prompt version")
+    c.add_argument(
+        "--mode",
+        choices=("agent", "one-call"),
+        default="agent",
+        help="one-call: the baseline with one model call on a fixed summary, no tools",
+    )
     c.add_argument("--tools", choices=sorted(TOOLSETS), default="v1", help="tool version")
     c.set_defaults(fn=cmd_agent_run)
     c = ag.add_parser("compare", help="variants side by side, from their scores (free)")

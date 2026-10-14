@@ -94,7 +94,9 @@ S5 step 1 (Bank data: fetch, check, cut, inspect, audit, load) built and tested 
 synthetic Bank and run on the VM (cut v2, audit clean; dev loading). Step 2, the grader
 (OpenRCA's evaluate() vendored; Microsoft's archived run re-graded 136/136; the bar:
 strict 0.16 on test), built; the harness hash changed (Bank files added): Yi re-approves
-(SETUP step 13). Plan: ROADMAP "S5 plan".**
+(SETUP step 13). S4 addendum, the one-call baseline (`--mode one-call`, `agent/summary.py`,
+decision rule in ROADMAP), built; next: its dev_small smoke (SETUP step 14). Plan: ROADMAP
+"S5 plan".**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,
@@ -273,7 +275,8 @@ src/yi_agent/
   outputs.py  OutputStore and cut(): results over the cap saved whole              (vendored)
   cli.py      `yi data ...`, `yi eval ...`, `yi agent run`
   agent/      loop (the ~200 lines), tools (read-only, one case), prompt, runner (split ->
-              trials, resumable, one condition per variant)
+              trials, resumable, one condition per variant), summary (the one-call
+              baseline's fixed summary of a case)
   analysis.py fault-signals: what each fault did to its root cause (reads labels; S4)
   data/       rcaeval (names, ids, labels, fetch), split, telemetry (case dir -> docs),
               openrca (Bank: queries, labels, split, fetch, check, cut into case dirs),

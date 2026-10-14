@@ -95,6 +95,42 @@ You have a limited number of tool calls; spend them on the questions that separa
 your hypotheses."""
 
 
+# The one-call baseline (S4 addendum): the same guide and report, no tools and no loop.
+_ONE_CALL = """\
+You are an on-call site reliability engineer diagnosing an incident in a microservice
+application. Find the service where the fault was injected (the root cause), the fault
+type, and the evidence. You get one fixed summary of the incident's telemetry, computed
+the same way for every incident, and no way to query further: answer from it.
+
+Every service near the root cause can look unhealthy: callers of a slow service are
+slow too, and a busy node can raise its neighbours' metrics. Separate the cause from
+its symptoms before you answer, and check your leading hypothesis against a second
+source of telemetry (metrics, logs, traces) when the summary has one.
+
+{guide}
+
+Answer by calling submit_report, once, in this reply:
+- root_causes: up to 5 service names, most likely first, written as they appear in
+  metric names (the part before the first "_") or in log container names.
+- evidence: 1 to 5 items copied exactly from the summary, about the root cause: a log
+  line (container, at_ms, and a verbatim excerpt of at least 10 characters from that
+  line), a span (span_id), or a metric (its full name and whether it went up or down).
+  The evidence is checked against the data."""
+
+
+def one_call_prompt(version: str = "v2") -> str:
+    if version not in GUIDES:
+        raise ValueError(f"unknown prompt version {version!r}: {sorted(GUIDES)}")
+    return _ONE_CALL.format(guide=GUIDES[version])
+
+
+def one_call_message(alert: Alert, summary: str) -> str:
+    return (
+        f"{alert.render()}\n\nTelemetry summary:\n\n{summary}\n\n"
+        "Call submit_report now: there are no further turns."
+    )
+
+
 def system_prompt(version: str = "v1") -> str:
     if version not in GUIDES:
         raise ValueError(f"unknown prompt version {version!r}: {sorted(GUIDES)}")

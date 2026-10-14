@@ -99,15 +99,17 @@ async def run_agent(
     run_tool: RunTool,
     config: AgentConfig | None = None,
     tracer: Tracer | None = None,
+    opening: str | None = None,
 ) -> AgentResult:
     """Investigate one case. Raises InfraFailure; every other ending is an AgentResult
-    (a run without a valid report has report=None and scores nothing)."""
+    (a run without a valid report has report=None and scores nothing). `opening`
+    replaces the first message (the one-call baseline sends its summary there)."""
     config = config or AgentConfig()
     tracer = tracer or Tracer.noop()
     result = AgentResult(case_id=alert.case_id)
     t0 = time.monotonic()
     messages: list[Message] = [
-        {"role": "user", "content": [{"type": "text", "text": first_message(alert)}]}
+        {"role": "user", "content": [{"type": "text", "text": opening or first_message(alert)}]}
     ]
     result.messages = messages
     nudged = False
