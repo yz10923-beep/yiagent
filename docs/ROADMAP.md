@@ -693,6 +693,11 @@ types ahead (dev: 7.5 of 77, the same ~9% of cases), all of it on RE2 (RE3 F1 is
 - Results beside the download, graded by OpenRCA's evaluate(), printed beside
   Microsoft's archived run on the same queries (dev: strict 0.12, mean 0.22; random
   0.06 / 0.17).
+- **Smoke (VM, 2026-10-15), 3 dev queries:** 3/3 submitted and scored 1.00 (time to the
+  minute, component and reason; two packet-loss queries and one high-CPU), 11.3 steps,
+  24 tool calls, $0.11 and 36 s a query, peak request 29K tokens. Three queries prove
+  only the plumbing: Microsoft's agent scores 0.12 strict on dev, so a result this far
+  above it gets the S3 treatment (a control that should fail) before it is believed.
 
 ## S5 plan
 
