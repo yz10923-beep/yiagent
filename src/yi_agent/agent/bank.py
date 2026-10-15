@@ -50,7 +50,7 @@ from yi_agent.eval.report import Report
 from yi_agent.llm.types import LLMProvider
 from yi_agent.trace.tracer import JsonlSpanWriter, Tracer
 
-PROMPTS = ("bank-v1",)
+PROMPTS = ("bank-v1", "bank-v2")
 # The placebo (as on RCAEval, S3): the agent sees only the baseline, told that its last 15
 # minutes are the window, and nothing from the real window's start on. It is graded
 # against the real answers: well above chance means something other than the failure's
@@ -79,6 +79,46 @@ metric_changes rather than guessing):
   slower or fail while most are unaffected: its tail latency rises far more than its
   median, and request counts or success rates may drop."""
 
+# bank-v2 (2026-10-15), from bank-v1's dev failures (ROADMAP "S5 step 3"): five wrong
+# answers named a datastore's noisy KPI, often with the window's start as the time; the
+# network faults were read as each other or missed; one time was lost to its seconds.
+# Mechanisms and method only: nothing names a query, a time or an answer.
+REASON_GUIDE_V2 = """\
+How each reason shows (KPI names carry the resource: OSLinux-CPU..., OSLinux-MEM...,
+OSLinux-DISK..., JVM-Memory..., JVM-Operating System...; look them up with overview and
+metric_changes rather than guessing):
+- high CPU usage: the component's operating-system CPU KPIs rise (for example
+  OSLinux-CPU_CPU_CPUCpuUtil) and stay up.
+- high JVM CPU load: the JVM's own CPU KPI rises (JVM-Operating System ... JVM_CPULoad);
+  compare it with the operating system's CPU on the same host: the JVM's rises more.
+- high memory usage: the operating system's memory-use KPIs rise and stay up, without
+  the JVM heap reaching its maximum.
+- JVM Out of Memory (OOM) Heap: the JVM heap used climbs to its maximum
+  (JVM-Memory ... HeapMemoryUsed against HeapMemoryMax); garbage-collection log lines
+  (log_name gc, "Full GC") multiply, and the JVM may restart.
+- high disk I/O read usage: the component's disk read KPIs (reads per second, read
+  bytes, busy time) jump far beyond their baseline range.
+- high disk space usage: file-system used-space KPIs (used percentage, used bytes)
+  climb steadily.
+- network latency: every request through the component is slower: in trace_stats for
+  that service both p50 and p90 rise, its callers wait with it, and its own resource
+  KPIs barely move.
+- network packet loss: retransmissions make a minority of requests through the
+  component much slower or fail: its p90 rises far more than its p50, request counts
+  or success rates may drop, and its resource KPIs barely move."""
+
+_V2_METHOD = """
+Separating the fault from noise (the most common mistakes):
+- A KPI is the fault only if it leaves its own baseline range at one minute and stays
+  out of it. Datastores (Mysql, Redis) and busy hosts have KPIs that swing all the
+  time: before naming one, look at it over the whole hour with metric_series and check
+  that the window is unlike the baseline.
+- If no KPI clearly leaves its baseline range, the fault may be in the network: compare
+  per-component span latency (trace_stats) before and after, then name the component
+  whose own requests changed first.
+- Never fall back to the window's start as the time; the time is the minute the
+  root cause's telemetry changed. Report times to the minute (seconds :00)."""
+
 _TEMPLATE = """\
 You are an on-call site reliability engineer investigating failures in a banking
 microservice platform, using only read-only telemetry tools over one hour: a 30-minute
@@ -98,7 +138,7 @@ symptoms but are never the answer.
 
 In the tools the "onset" (t+0s) is the window's start: "before" is the baseline and
 "after" is the window; t+Ns is seconds from the window's start, so t+480s is 8 minutes
-into it. metric_series shows a KPI minute by minute: use it to find when a change began.
+into it. metric_series shows a KPI minute by minute: use it to find when a change began.{method}
 Every service near the root cause can look unhealthy, and a host can raise its
 neighbours' metrics: separate the cause from its symptoms, and check your leading
 hypothesis against a second source (metrics, logs, traces).
@@ -114,10 +154,12 @@ hypotheses."""
 def bank_system_prompt(version: str = "bank-v1") -> str:
     if version not in PROMPTS:
         raise ValueError(f"unknown Bank prompt {version!r}: {PROMPTS}")
+    v2 = version == "bank-v2"
     return _TEMPLATE.format(
         components=", ".join(openrca.COMPONENTS),
         reasons="; ".join(openrca.REASONS),
-        guide=REASON_GUIDE,
+        guide=REASON_GUIDE_V2 if v2 else REASON_GUIDE,
+        method=_V2_METHOD if v2 else "",
     )
 
 
@@ -199,10 +241,14 @@ def bank_tool_specs() -> list[dict[str, Any]]:
     return [*specs, _bank_submit()]
 
 
-def parse_bank_report(q: BankQuery) -> Callable[[str, dict[str, Any]], BankReport]:
+def parse_bank_report(
+    q: BankQuery, to_minute: bool = False
+) -> Callable[[str, dict[str, Any]], BankReport]:
     """submit_report's input as a BankReport. The checks use only what the alert told
     the agent (the window, the number of failures), so a refusal teaches it nothing
-    about the answer."""
+    about the answer. `to_minute` (bank-v2) drops a time's seconds: OpenRCA's times are
+    whole minutes, so a time t is within a minute of the truth T whenever t floored is,
+    and floored it also passes for t up to two minutes late."""
     n = len(q.failures)
 
     def parse(case_id: str, args: dict[str, Any]) -> BankReport:
@@ -216,6 +262,8 @@ def parse_bank_report(q: BankQuery) -> Callable[[str, dict[str, Any]], BankRepor
                 when = datetime.strptime(t[:19], TIME_FORMAT)
             except ValueError as e:
                 raise ValueError(f"time {t!r} is not YYYY-mm-dd HH:MM:SS") from e
+            if to_minute:
+                when = when.replace(second=0)
             ms = local_ms(when.strftime(TIME_FORMAT))
             if not q.start_ms <= ms < q.end_ms:
                 raise ValueError(
@@ -261,7 +309,7 @@ class BankCondition:
             max_steps=self.max_steps,
             system=bank_system_prompt(self.prompt),
             tools=bank_tool_specs(),
-            parse=parse_bank_report(q),
+            parse=parse_bank_report(q, to_minute=self.prompt == "bank-v2"),
         )
 
     def record(self) -> dict[str, Any]:

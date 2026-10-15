@@ -720,6 +720,27 @@ the run: placebo strict at or below ~0.10 and mean at or below ~0.25 (chance 0.0
 0.17, plus what priors over components and reasons can buy) means bank-v1's 0.53 is
 the failures' effect; above that, stop and look for a leak.
 
+**Placebo (VM, 2026-10-15): strict 0.00, mean 0.07** (chance 0.06 / 0.17): no time
+right, component 0.13, reason 0.16; 18.2 steps and $0.196 a query (it searched longer
+for a failure it could not see), naming the same distractors (Mysql disk reads, Tomcat
+CPU). By the rule, **bank-v1's 0.53 is the failures' effect.**
+
+**bank-v2 (built 2026-10-15), from bank-v1's dev failures:** (1) separating the fault
+from noise: a KPI is the fault only if it leaves its own baseline range at one minute and
+stays out; look at a datastore's KPI over the whole hour before naming it; if no KPI
+leaves its range, compare per-component span latency; never fall back to the window's
+start as the time; (2) latency vs packet loss by p50 and p90 together vs p90 alone;
+JVM CPU vs operating-system CPU on the same host; (3) times to the minute: the report's
+seconds are dropped (OpenRCA's times are whole minutes, so flooring never loses a time
+point and wins answers up to two minutes late; a test checks both). bank-v1 is pinned
+(system sha c93f48a97352, unchanged).
+
+**Decision rule (written before the runs):** one repeat of bank-v1 for the noise, two
+runs of bank-v2, all on the 34 dev queries. bank-v2 replaces bank-v1 if its mean
+strictly-right count over its two runs is at least 3 queries above bank-v1's mean over
+its two, and its mean score is not lower; otherwise bank-v1 stays (it is the simpler,
+measured one). The chosen agent then runs on test once.
+
 ## S5 plan
 
 1. **Data** (built and tested on a synthetic Bank, 2026-10-13): `yi data bank fetch |

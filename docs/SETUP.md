@@ -256,6 +256,14 @@ the binding to 0.0.0.0.
     uv run yi agent bank-run --split dev --variant bank-placebo --placebo 2>&1 | tee ~/bank-placebo.txt
     ```
 
+    The prompt A/B (about $14 in all, 10-15 minutes each):
+
+    ```bash
+    uv run yi agent bank-run --split dev --variant bank-v1-2 2>&1 | tee ~/bank-v1-2.txt
+    uv run yi agent bank-run --split dev --variant bank-v2 --prompt bank-v2 2>&1 | tee ~/bank-v2.txt
+    uv run yi agent bank-run --split dev --variant bank-v2-2 --prompt bank-v2 2>&1 | tee ~/bank-v2-2.txt
+    ```
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

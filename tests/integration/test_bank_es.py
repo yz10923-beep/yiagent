@@ -149,6 +149,11 @@ def test_the_bank_agent_runs_end_to_end_through_the_cli(
             == 0
         )
         assert not any(es.indices.exists(index=index_name(i, "traces")) for i in ids)
+        v2 = ["agent", "bank-run", "--split", "all", "--variant", "bank-v2", "--prompt", "bank-v2"]
+        assert cli.main(v2) == 0
+        v2_run = openrca.raw_dir(data_dir) / "results" / "bank-v2" / "all" / "run.json"
+        assert json.loads(v2_run.read_text())["prompt"] == "bank-v2"
+        capsys.readouterr()
         # the placebo: the same run, nothing at or after the real window's start visible
         assert (
             cli.main(

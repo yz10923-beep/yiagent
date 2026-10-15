@@ -99,7 +99,9 @@ strict 0.16 on test), built; the harness hash changed (Bank files added): Yi re-
 38.5/77 against the agent's 1.00 and 46.0, so by the pre-set rule the loop earns its
 cost (ROADMAP "S4 addendum"); on test one call 0.93 / 164 against the agent's 0.98 / 189.
 Bank dev loaded (34 cases). S5 step 3, the agent on Bank (`agent/bank.py`, `yi agent
-bank-run`), built; next: its 3-query smoke, then dev (SETUP step 15).**
+bank-run`): dev strict 0.53 / mean 0.60 (Microsoft's archived agent 0.12 / 0.22; placebo
+0.00 / 0.07, so not a leak). Next: the bank-v1 repeat and bank-v2 x2 on dev, decided by
+the rule in ROADMAP, then test once (SETUP step 15).**
 
 Done in S0:
 - Repo, `pyproject.toml` (uv, Python 3.12), Makefile, `make verify` (ruff, mypy --strict,

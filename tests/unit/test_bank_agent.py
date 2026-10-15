@@ -126,3 +126,37 @@ def test_the_placebo_shows_a_window_that_ends_where_the_real_one_starts(
     rec = BankCondition(model="m", effort="high", max_steps=25, placebo=True).record()
     assert rec["placebo"] == {"window_ms": PLACEBO_WINDOW_MS}
     assert "placebo" not in BankCondition(model="m", effort="high", max_steps=25).record()
+
+
+def test_bank_v1_is_pinned_and_v2_adds_only_method() -> None:
+    from yi_agent.agent.bank import bank_system_sha
+
+    assert bank_system_sha("bank-v1") == "c93f48a97352"  # the prompt of the dev run (VM)
+    v1, v2 = bank_system_prompt("bank-v1"), bank_system_prompt("bank-v2")
+    assert "baseline range" in v2 and "baseline range" not in v1
+    assert all(c in v2 for c in openrca.COMPONENTS) and all(r in v2 for r in openrca.REASONS)
+
+
+def test_flooring_to_the_minute_never_loses_a_time_point(queries: list[BankQuery]) -> None:
+    """OpenRCA's truth times are whole minutes: a floored answer is within 60 s of the
+    truth whenever the raw one is, and also for answers up to two minutes late."""
+    from yi_agent.eval.bank import BankFailure, BankReport, prediction_json
+    from yi_agent.eval.openrca_evaluate import evaluate
+
+    q = next(q for q in queries if q.asked == ("time",))
+    truth = q.failures[0].time_ms
+    raw, floored = parse_bank_report(q), parse_bank_report(q, to_minute=True)
+    gained = 0
+    for offset_s in range(-90, 150, 7):
+        args = {"failures": [_one(q, time=local_str(truth + offset_s * 1000))], "evidence": []}
+
+        def score(parse: object, args: dict[str, object] = args) -> float:
+            r = parse(q.id, args)  # type: ignore[operator]
+            f = r.failures[0]
+            rep = BankReport(case_id=q.id, failures=[BankFailure(time=f.time)])
+            return evaluate(prediction_json(rep), q.scoring_points)[2]
+
+        a, b = score(raw), score(floored)
+        assert b >= a, offset_s
+        gained += b > a
+    assert gained > 0
