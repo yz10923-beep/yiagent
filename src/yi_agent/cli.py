@@ -309,7 +309,11 @@ def cmd_agent_bank_run(settings: Settings, args: argparse.Namespace) -> int:
     from yi_agent.agent.bank import BankCondition, run_bank_split
 
     cond = BankCondition(
-        model=args.model, effort=args.effort, max_steps=args.max_steps, prompt=args.prompt
+        model=args.model,
+        effort=args.effort,
+        max_steps=args.max_steps,
+        prompt=args.prompt,
+        placebo=args.placebo,
     )
     key = settings.anthropic_api_key
 
@@ -654,6 +658,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--prompt", default="bank-v1", help="Bank prompt version")
     c.add_argument("--parallel", type=int, default=3)
     c.add_argument("--unload-after", action="store_true", help="unload each query after its trial")
+    c.add_argument(
+        "--placebo",
+        action="store_true",
+        help="control: show only the baseline, its last 15 minutes as the window",
+    )
     c.set_defaults(fn=cmd_agent_bank_run)
     c = ag.add_parser("compare", help="variants side by side, from their scores (free)")
     c.add_argument("variants", nargs="+", help="results directories, e.g. baro agent")

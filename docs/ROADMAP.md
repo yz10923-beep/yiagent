@@ -699,6 +699,27 @@ types ahead (dev: 7.5 of 77, the same ~9% of cases), all of it on RE2 (RE3 F1 is
   only the plumbing: Microsoft's agent scores 0.12 strict on dev, so a result this far
   above it gets the S3 treatment (a control that should fail) before it is believed.
 
+**Dev, 34 queries, bank-v1 (VM, 2026-10-15): strict 0.53, mean 0.60** (Microsoft's
+archived RCA-agent on the same queries: 0.12 / 0.22; random 0.06 / 0.17). 34/34
+submitted, 13.4 steps, 28.7 tool calls, $0.138 and 41 s a query ($4.69), peak request
+59K tokens. Per failure, against the full truth: component 0.63, reason 0.58, time 0.68.
+- Strong on resource faults: high CPU strict 0.88 (8), disk I/O read 0.75 (8).
+- **Weak on network faults:** latency 0.17 (6; reason never right, three read as packet
+  loss), packet loss 0.33 (9). Rare reasons 0/3 (JVM CPU load, OOM heap, disk space).
+- **The distractor is a datastore again** (as `session-db` on RCAEval): 5 wrong answers
+  name Mysql01/02, mostly "high disk I/O read", often with the window's start as the
+  time (14:00, 19:00, 23:30): no onset found, the noisiest KPI named.
+- One time-only query lost to a time 61-119 s off (truth 16:47:00, answer 16:48 with
+  seconds); OpenRCA's times are whole minutes.
+
+**Before any tuning, the placebo** (`--placebo`, built 2026-10-15): the agent sees only
+the baseline, told its last 15 minutes are the window, nothing from the real window's
+start on (Elasticsearch ceiling, tested), graded against the real answers. Times can
+then only score by a one-minute coincidence at the window's edge. Rule, written before
+the run: placebo strict at or below ~0.10 and mean at or below ~0.25 (chance 0.06 /
+0.17, plus what priors over components and reasons can buy) means bank-v1's 0.53 is
+the failures' effect; above that, stop and look for a leak.
+
 ## S5 plan
 
 1. **Data** (built and tested on a synthetic Bank, 2026-10-13): `yi data bank fetch |

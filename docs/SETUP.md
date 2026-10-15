@@ -250,6 +250,12 @@ the binding to 0.0.0.0.
     Each query prints one line (steps, cost, what was asked, truth, answer, score). More
     than 5 minutes without a new line means a stuck call; rerunning resumes.
 
+    The placebo control (about $4; the agent sees only the baseline):
+
+    ```bash
+    uv run yi agent bank-run --split dev --variant bank-placebo --placebo 2>&1 | tee ~/bank-placebo.txt
+    ```
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

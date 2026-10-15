@@ -51,6 +51,11 @@ from yi_agent.llm.types import LLMProvider
 from yi_agent.trace.tracer import JsonlSpanWriter, Tracer
 
 PROMPTS = ("bank-v1",)
+# The placebo (as on RCAEval, S3): the agent sees only the baseline, told that its last 15
+# minutes are the window, and nothing from the real window's start on. It is graded
+# against the real answers: well above chance means something other than the failure's
+# effect points at the answer (priors over components and reasons, or a leak).
+PLACEBO_WINDOW_MS = 15 * 60 * 1000
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 REASON_GUIDE = """\
@@ -245,6 +250,7 @@ class BankCondition:
     effort: str | None
     max_steps: int
     prompt: str = "bank-v1"
+    placebo: bool = False
 
     def __post_init__(self) -> None:
         if self.prompt not in PROMPTS:
@@ -269,7 +275,31 @@ class BankCondition:
             "system_sha": bank_system_sha(self.prompt),
             "tools_sha": hashlib.sha256(tools).hexdigest()[:12],
             "loop_version": LOOP_VERSION,
-        }
+        } | ({"placebo": {"window_ms": PLACEBO_WINDOW_MS}} if self.placebo else {})
+
+
+def shown(q: BankQuery, placebo: bool) -> BankQuery:
+    """The query as the agent is told it: the real one, or under the placebo a window that
+    ends where the real one starts (the failures and asked fields unchanged)."""
+    if not placebo:
+        return q
+    return q.model_copy(update={"start_ms": q.start_ms - PLACEBO_WINDOW_MS, "end_ms": q.start_ms})
+
+
+def case_tools(
+    es: Elasticsearch, q: BankQuery, sources: tuple[Kind, ...], placebo: bool
+) -> CaseTools:
+    """The tools for one query: the window's start is their onset and the baseline their
+    'before'; under the placebo nothing at or after the real window's start is visible."""
+    told = shown(q, placebo)
+    half = PLACEBO_WINDOW_MS if placebo else openrca.BASELINE_MS
+    ceiling = q.start_ms if placebo else None
+    return CaseTools(
+        CaseIndices(es, q.id, sources, ceiling_ms=ceiling),
+        told.start_ms,
+        half_window_ms=half,
+        error_counts=True,
+    )
 
 
 type Progress = Callable[[str], None]
@@ -358,23 +388,19 @@ async def _run_query(
     case_dir = openrca.cases_dir(data_dir) / q.id
     window = openrca.read_case_window(case_dir)
     sources, empty = _case_sources(case_dir)
+    told = shown(q, cond.placebo)  # the agent's view; grading uses q, the real query
     alert = Alert(
         case_id=q.id,
         system="Bank",
-        onset_ms=q.start_ms,
+        onset_ms=told.start_ms,
         start_ms=window["baseline_start_ms"],
-        end_ms=q.end_ms,
+        end_ms=told.end_ms,
         sources=sources,
     )
-    opening = bank_alert(q, window["baseline_start_ms"], sources, empty)
-    tools = CaseTools(
-        CaseIndices(es, q.id, sources),
-        q.start_ms,
-        half_window_ms=openrca.BASELINE_MS,
-        error_counts=True,
-    )
+    opening = bank_alert(told, window["baseline_start_ms"], sources, empty)
+    tools = case_tools(es, q, sources, cond.placebo)
     result = AgentResult(case_id=q.id)
-    config = cond.config(q)
+    config = cond.config(told)
     try:
         try:
             await asyncio.to_thread(ensure_loaded, es, q.id, case_dir, say)

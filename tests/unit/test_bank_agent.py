@@ -111,3 +111,18 @@ def test_the_condition_is_recorded_as_a_bank_run() -> None:
     assert len(rec["system_sha"]) == 12 and len(rec["tools_sha"]) == 12
     with pytest.raises(ValueError):
         BankCondition(model="m", effort=None, max_steps=25, prompt="v2")
+
+
+def test_the_placebo_shows_a_window_that_ends_where_the_real_one_starts(
+    queries: list[BankQuery],
+) -> None:
+    from yi_agent.agent.bank import PLACEBO_WINDOW_MS, shown
+
+    q = queries[0]
+    assert shown(q, False) is q
+    fake = shown(q, True)
+    assert fake.end_ms == q.start_ms and fake.start_ms == q.start_ms - PLACEBO_WINDOW_MS
+    assert fake.failures == q.failures and fake.asked == q.asked  # graded on the real ones
+    rec = BankCondition(model="m", effort="high", max_steps=25, placebo=True).record()
+    assert rec["placebo"] == {"window_ms": PLACEBO_WINDOW_MS}
+    assert "placebo" not in BankCondition(model="m", effort="high", max_steps=25).record()

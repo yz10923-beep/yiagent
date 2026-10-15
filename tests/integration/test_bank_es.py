@@ -149,6 +149,27 @@ def test_the_bank_agent_runs_end_to_end_through_the_cli(
             == 0
         )
         assert not any(es.indices.exists(index=index_name(i, "traces")) for i in ids)
+        # the placebo: the same run, nothing at or after the real window's start visible
+        assert (
+            cli.main(
+                ["agent", "bank-run", "--split", "all", "--variant", "bank-placebo", "--placebo"]
+            )
+            == 0
+        )
+        out = capsys.readouterr().out
+        assert "outcomes {'submitted': 6}" in out
+        run_dir = openrca.raw_dir(data_dir) / "results" / "bank-placebo" / "all"
+        assert json.loads((run_dir / "run.json").read_text())["placebo"]
+        from yi_agent.agent.bank import case_tools
+        from yi_agent.data.es_load import ensure_loaded
+
+        for q in _labels(fx):
+            ensure_loaded(es, q.id, openrca.cases_dir(data_dir) / q.id)
+            tools = case_tools(es, q, ("logs", "traces", "metrics"), placebo=True)
+            for kind in ("logs", "traces", "metrics"):
+                r = tools.data.search(kind, size=1, sort=[{"@timestamp": "desc"}])
+                assert r["hits"]["hits"][0]["_source"]["@timestamp"] < q.start_ms, (q.id, kind)
+            unload_case(es, q.id)
     finally:
         for i in ids:
             unload_case(es, i)
