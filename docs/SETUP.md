@@ -264,6 +264,14 @@ the binding to 0.0.0.0.
     uv run yi agent bank-run --split dev --variant bank-v2-2 --prompt bank-v2 2>&1 | tee ~/bank-v2-2.txt
     ```
 
+    The test split, once, with the final Bank agent (bank-v1). The 102 test queries are
+    not loaded: `--unload-after` loads each, runs it and unloads it (about $14 and 2.5-3
+    hours, mostly loading; run inside tmux; rerunning resumes):
+
+    ```bash
+    uv run yi agent bank-run --split test --variant bank-final --unload-after 2>&1 | tee ~/bank-final-test.txt
+    ```
+
 ## Troubleshooting
 
 - **Health stays red, or index creation times out:** the disk is over the 90% high

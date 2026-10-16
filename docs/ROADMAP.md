@@ -741,6 +741,20 @@ strictly-right count over its two runs is at least 3 queries above bank-v1's mea
 its two, and its mean score is not lower; otherwise bank-v1 stays (it is the simpler,
 measured one). The chosen agent then runs on test once.
 
+**Result (VM, 2026-10-16):**
+
+| prompt | run 1 strict | run 2 strict | mean strict | mean score | $/query |
+|---|---|---|---|---|---|
+| bank-v1 | 18/34 (0.53) | 19/34 (0.56) | **18.5** | 0.62 | 0.13-0.14 |
+| bank-v2 | 17/34 (0.50) | 21/34 (0.62) | **19.0** | 0.63 | 0.13-0.14 |
+
+**bank-v2 is 0.5 queries ahead, under the 3 the rule asks: bank-v1 stays** and is the
+final Bank agent. The noise is the finding: the same bank-v2 prompt scored 17 and 21,
+8 of 34 queries flipping between its two runs (5 between bank-v1's). Over the four
+runs, 14 queries are strictly right every time, 10 never, 10 vary. A single run of
+bank-v2 would have read as a loss (17 against 18) or as a +3 win (21). Network latency
+stays the weak spot under both prompts (strict 0.17): the wording did not fix it.
+
 ## S5 plan
 
 1. **Data** (built and tested on a synthetic Bank, 2026-10-13): `yi data bank fetch |
